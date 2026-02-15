@@ -1,0 +1,38 @@
+name: Build Zeroclaw Linux AMD64
+
+on: [push, pull_request]
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    runs-on: ubuntu-latest  # Linux AMD64 环境
+    
+    steps:
+    - name: 检出代码 (Checkout)
+      uses: actions/checkout@v4
+      
+    - name: 安装 Rust 工具链
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: stable
+        targets: x86_64-unknown-linux-gnu
+        
+    - name: 缓存 Rust 依赖 (加速编译)
+      uses: swatinem/rust-cache@v2
+      
+    - name: 编译 Release 版本
+      run: cargo build --release --target x86_64-unknown-linux-gnu
+      
+    - name: 验证编译产物
+      run: |
+        ls -la target/x86_64-unknown-linux-gnu/release/
+        file target/x86_64-unknown-linux-gnu/release/zeroclaw  # 替换为实际二进制名
+        
+    - name: 上传编译产物 (仅 Push 到 main 分支)
+      if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+      uses: actions/upload-artifact@v4
+      with:
+        name: zeroclaw-linux-amd64
+        path: target/x86_64-unknown-linux-gnu/release/zeroclaw  # 替换为实际二进制名
