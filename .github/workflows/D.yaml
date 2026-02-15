@@ -21,7 +21,7 @@ jobs:
             goarch: arm64
 
     steps:
-      - name: Checkout this repo (for workflow only)
+      - name: Checkout this repo (workflow only)
         uses: actions/checkout@v4
 
       - name: Setup Go (latest stable)
@@ -40,6 +40,51 @@ jobs:
           git checkout "${{ inputs.ref }}"
           echo "Checked out ref: $(git rev-parse --short HEAD)"
 
+      - name: Update submodules (best effort)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd src
+          git submodule sync --recursive || true
+          git submodule update --init --recursive || true
+
+      - name: Pull Git LFS files (best effort)
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd src
+          if ! command -v git-lfs >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install -y git-lfs
+          fi
+          git lfs install
+          git lfs pull || true
+
+      - name: Ensure workspace exists for go:embed
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd src
+
+          echo "== go:embed snippet (cmd/picoclaw/main.go:35-60) =="
+          nl -ba cmd/picoclaw/main.go | sed -n '35,60p' || true
+          echo
+
+          echo "== workspace before =="
+          ls -la workspace || true
+          echo
+
+          # IMPORTANT:
+          # Go 的 //go:embed pattern 不能匹配到 0 个文件，否则编译直接失败。
+          # 所以必须保证 workspace 目录存在并且至少包含一个文件。
+          mkdir -p workspace
+          if [ -z "$(find workspace -type f 2>/dev/null | head -n 1)" ]; then
+            echo "placeholder" > workspace/.keep
+          fi
+
+          echo "== workspace after =="
+          ls -la workspace || true
+
       - name: Build
         shell: bash
         run: |
@@ -51,7 +96,7 @@ jobs:
           export CGO_ENABLED=0
 
           OUT="picoclaw-${{ matrix.goos }}-${{ matrix.goarch }}"
-          GOOS=${{ matrix.goos }} GOARCH=${{ matrix.goarch }} \
+          GOOS="${{ matrix.goos }}" GOARCH="${{ matrix.goarch }}" \
             go build -trimpath -ldflags="-s -w" \
             -o "../dist/${OUT}" ./cmd/picoclaw
 
