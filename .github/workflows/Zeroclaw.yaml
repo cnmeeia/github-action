@@ -1,38 +1,65 @@
-name: Build Zeroclaw Linux AMD64
+name: build-zeroclaw-linux-amd64
 
-on: [push, pull_request]
-
-env:
-  CARGO_TERM_COLOR: always
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Upstream ref (branch/tag/commit). Default: main"
+        required: false
+        default: "main"
+  push:
+    branches: ["main"]
 
 jobs:
   build:
-    runs-on: ubuntu-latest  # Linux AMD64 环境
-    
+    runs-on: ubuntu-latest
     steps:
-    - name: 检出代码 (Checkout)
-      uses: actions/checkout@v4
-      
-    - name: 安装 Rust 工具链
-      uses: dtolnay/rust-toolchain@stable
-      with:
-        toolchain: stable
-        targets: x86_64-unknown-linux-gnu
-        
-    - name: 缓存 Rust 依赖 (加速编译)
-      uses: swatinem/rust-cache@v2
-      
-    - name: 编译 Release 版本
-      run: cargo build --release --target x86_64-unknown-linux-gnu
-      
-    - name: 验证编译产物
-      run: |
-        ls -la target/x86_64-unknown-linux-gnu/release/
-        file target/x86_64-unknown-linux-gnu/release/zeroclaw  # 替换为实际二进制名
-        
-    - name: 上传编译产物 (仅 Push 到 main 分支)
-      if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-      uses: actions/upload-artifact@v4
-      with:
-        name: zeroclaw-linux-amd64
-        path: target/x86_64-unknown-linux-gnu/release/zeroclaw  # 替换为实际二进制名
+      - name: Checkout this repo (just the workflow)
+        uses: actions/checkout@v4
+
+      - name: Install Rust (stable)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+
+      - name: Clone upstream zeroclaw
+        run: |
+          set -euxo pipefail
+          REF="${{ inputs.ref }}"
+          if [ -z "${REF}" ]; then REF="main"; fi
+
+          git clone https://github.com/theonlyhennygod/zeroclaw.git
+          cd zeroclaw
+          git fetch --all --tags
+          git checkout "${REF}"
+
+          echo "UPSTREAM_SHA=$(git rev-parse --short HEAD)" >> "$GITHUB_ENV"
+          echo "UPSTREAM_REF=${REF}" >> "$GITHUB_ENV"
+
+      - name: Build (release, linux amd64)
+        working-directory: zeroclaw
+        env:
+          CARGO_TERM_COLOR: always
+        run: |
+          set -euxo pipefail
+          cargo build --release --locked
+          ls -lah target/release/zeroclaw
+
+      - name: Package artifact
+        working-directory: zeroclaw
+        run: |
+          set -euxo pipefail
+          mkdir -p out
+          cp -v target/release/zeroclaw "out/zeroclaw-linux-amd64-${UPSTREAM_REF}-${UPSTREAM_SHA}"
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: zeroclaw-linux-amd64-${{ env.UPSTREAM_REF }}-${{ env.UPSTREAM_SHA }}
+          path: zeroclaw/out/*
+          if-no-files-found: error
