@@ -1,0 +1,68 @@
+name: Build nullclaw (linux amd64)
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - ".github/workflows/build-nullclaw-linux-amd64.yml"
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout this repo (workflow host)
+        uses: actions/checkout@v4
+
+      - name: Install deps
+        shell: bash
+        run: |
+          set -euxo pipefail
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            xz-utils curl ca-certificates git \
+            build-essential pkg-config \
+            libsqlite3-dev
+
+      - name: Fetch nullclaw source (no fork)
+        shell: bash
+        run: |
+          set -euxo pipefail
+          rm -rf nullclaw
+          git clone --depth 1 https://github.com/nullclaw/nullclaw.git
+          cd nullclaw
+          # 如果未来项目用 submodule，这行不亏
+          git submodule update --init --recursive || true
+
+      - name: Install Zig 0.15.2 (linux x86_64)
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ZIG_VER="0.15.2"
+          ZIG_DIR="$HOME/zig"
+          mkdir -p "$ZIG_DIR"
+          curl -L --fail \
+            -o /tmp/zig.tar.xz \
+            "https://ziglang.org/download/${ZIG_VER}/zig-x86_64-linux-${ZIG_VER}.tar.xz"
+          tar -xf /tmp/zig.tar.xz -C /tmp
+          mv "/tmp/zig-x86_64-linux-${ZIG_VER}" "$ZIG_DIR"
+          echo "$ZIG_DIR/zig-x86_64-linux-${ZIG_VER}" >> $GITHUB_PATH
+
+      - name: Build (ReleaseSmall)
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd nullclaw
+          zig version
+          zig build -Doptimize=ReleaseSmall
+          ls -lah zig-out/bin || true
+          file zig-out/bin/nullclaw
+
+      - name: Upload artifact (nullclaw linux amd64)
+        uses: actions/upload-artifact@v4
+        with:
+          name: nullclaw-linux-amd64
+          path: |
+            nullclaw/zig-out/bin/nullclaw
+            nullclaw/README.md
+            nullclaw/LICENSE
