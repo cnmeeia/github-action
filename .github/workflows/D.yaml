@@ -74,9 +74,7 @@ jobs:
           ls -la workspace || true
           echo
 
-          # IMPORTANT:
-          # Go 的 //go:embed pattern 不能匹配到 0 个文件，否则编译直接失败。
-          # 所以必须保证 workspace 目录存在并且至少包含一个文件。
+          # Ensure workspace exists and contains at least one file
           mkdir -p workspace
           if [ -z "$(find workspace -type f 2>/dev/null | head -n 1)" ]; then
             echo "placeholder" > workspace/.keep
