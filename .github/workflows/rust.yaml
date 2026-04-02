@@ -1,29 +1,35 @@
-name: Build claw-code from ZIP
+name: Build claw-code for Mac ARM64
 
 on:
   workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
 
     steps:
-    - name: Install unzip
-      run: sudo apt-get update && sudo apt-get install -y unzip wget
+    - name: Download and Unzip
+      run: |
+        curl -L https://github.com/ultraworkers/claw-code/archive/refs/heads/main.zip -o claw-code.zip
+        unzip claw-code.zip
 
-    - name: Download ZIP
-      run: wget https://github.com/ultraworkers/claw-code/archive/refs/heads/main.zip -O claw-code.zip
-
-    - name: Unzip
-      run: unzip claw-code.zip
+    - name: Set up Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: aarch64-apple-darwin
 
     - name: Build Rust project
       run: |
         cd claw-code-main/rust
-        cargo build --release
+        cargo build --release --target aarch64-apple-darwin
 
-    - name: Upload artifact
+    - name: Upload Binary Only
       uses: actions/upload-artifact@v4
       with:
-        name: claw-code-release
-        path: claw-code-main/rust/target/release/
+        name: claw-code-mac-arm64
+        # 这里通过通配符只匹配二进制文件，排除 .d 或其他目录
+        # 注意：你需要确认二进制文件的确切名称，如果不确定，可以用 *
+        path: |
+          claw-code-main/rust/target/aarch64-apple-darwin/release/claw*
+        # 排除所有以 .d 结尾的调试辅助文件
+        if-no-files-found: error
