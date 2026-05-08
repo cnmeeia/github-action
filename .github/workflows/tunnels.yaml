@@ -1,0 +1,63 @@
+name: Build Cloudflared IPK for iStoreOS
+
+on:
+  workflow_dispatch: # 手动触发编译
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Cloudflared
+        uses: actions/checkout@v4
+        with:
+          repository: cloudflare/cloudflared
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.22' # 建议使用较新的 Go 版本
+
+      - name: Compile for aarch64
+        run: |
+          # 设置交叉编译参数
+          export GOOS=linux
+          export GOARCH=arm64
+          # 编译并减小体积 (移除符号表和调试信息)
+          go build -v -ldflags="-s -w" -o cloudflared ./cmd/cloudflared
+
+      - name: Prepare IPK Structure
+        run: |
+          # 创建 IPK 所需的目录结构
+          mkdir -p ipk/usr/bin
+          mkdir -p ipk/CONTROL
+          
+          # 复制二进制文件
+          cp cloudflared ipk/usr/bin/
+          chmod +x ipk/usr/bin/cloudflared
+
+          # 生成 control 文件 (IPK 的元数据)
+          cat <<EOF > ipk/CONTROL/control
+          Package: cloudflared
+          Version: $(date +%Y.%m.%d)
+          Architecture: aarch64
+          Maintainer: Gemini-Custom-Build
+          Description: Cloudflare Tunnel client for iStoreOS
+          Section: net
+          Priority: optional
+          EOF
+
+      - name: Package IPK
+        run: |
+          # 使用 tar 打包 (ipk 本质是包含特定内容的 tar.gz)
+          # 注意：为了兼容性，这里模拟简单的 ipk 打包过程
+          tar -czf control.tar.gz -C ipk/CONTROL .
+          cd ipk && tar -czf ../data.tar.gz --exclude='./CONTROL' . && cd ..
+          echo "2.0" > debian-binary
+          tar -czf cloudflared_aarch64.ipk control.tar.gz data.tar.gz debian-binary
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloudflared-istoreos-ipk
+          path: cloudflared_aarch64.ipk
