@@ -5,6 +5,10 @@ on:
     - cron: '0 */6 * * *'        # 每6小时自动更新一次
   workflow_dispatch:              # 支持手动触发
 
+# 关键修复：显式赋予 Actions 允许写入仓库的权限
+permissions:
+  contents: write
+
 jobs:
   update-config:
     runs-on: ubuntu-latest
@@ -25,10 +29,8 @@ jobs:
 
           echo "处理配置（带旗帜 + 重复递增）..."
 
-          # 直接使用 awk 处理，增强了正则容错和空格清理
           awk '
           BEGIN {
-              # 初始化国旗字典
               flags["Czechia"]="🇨🇿"; flags["Czech Republic"]="🇨🇿";
               flags["Finland"]="🇫🇮"; flags["France"]="🇫🇷";
               flags["Germany"]="🇩🇪"; flags["Hong Kong"]="🇭🇰";
@@ -39,18 +41,14 @@ jobs:
               flags["UK"]="🇬🇧"; flags["United States"]="🇺🇸"; flags["USA"]="🇺🇸";
           }
           /^vless:\/\// {
-              # 1. 提取 # 后面的原始别名
               if (match($0, /#(.*)$/, expr)) {
                   alias = expr[1];
               } else {
                   alias = "Unknown";
               }
               
-              # 移除 URL 后面的旧别名
               sub(/#.*$/, "", $0);
 
-              # 2. 智能解析 [国家] [城市]
-              # 匹配规则：前一部分为英文字母/空格，后一部分为英文字母/数字/空格
               if (match(alias, /^([A-Za-z ]+)[[:space:]]+([A-Za-z0-9 ]+)/, loc)) {
                   country = loc[1];
                   city = loc[2];
@@ -59,11 +57,9 @@ jobs:
                   city = alias;
               }
 
-              # 3. 清理提取出来的内容的前后空格 (Trim)
               gsub(/^[[:space:]]+|[[:space:]]+$/, "", country);
               gsub(/^[[:space:]]+|[[:space:]]+$/, "", city);
 
-              # 4. 计算重复并生成新名称
               key = country "|" city;
               count[key]++;
 
@@ -82,13 +78,16 @@ jobs:
 
       - name: 提交并推送更新
         run: |
+          OUTPUT_FILE="BLACK_VLESS_RUS_clean.txt"
+          
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           
-          if git diff --quiet "$OUTPUT_FILE"; then
+          # 关键修复：使用 git status --porcelain 规避首次运行或空改动的 fatal 错误
+          if [ -z "$(git status --porcelain "$OUTPUT_FILE")" ]; then
             echo "配置没有变化，跳过提交"
           else
-            git add BLACK_VLESS_RUS_clean.txt
+            git add "$OUTPUT_FILE"
             git commit -m "🔄 自动更新 VLESS 配置 $(date '+%Y-%m-%d %H:%M:%S')"
             git push
             echo "✅ 已成功更新并推送"
