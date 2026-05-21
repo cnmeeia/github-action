@@ -1,0 +1,83 @@
+name: 更新 BLACK VLESS 配置
+
+on:
+  schedule:
+    - cron: '0 */6 * * *'        # 每6小时自动更新一次
+  workflow_dispatch:              # 支持手动触发
+
+jobs:
+  update-config:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 检出仓库
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 下载并处理 VLESS 配置
+        run: |
+          URL="https://raw.githubusercontent.com/igareck/vpn-configs-for-russia/refs/heads/main/Base64/BLACK_VLESS_RUS_base64.txt"
+          OUTPUT_FILE="BLACK_VLESS_RUS_clean.txt"
+
+          echo "正在下载最新配置..."
+          curl -sL -o original.txt "$URL"
+
+          echo "处理配置（带旗帜 + 重复递增）..."
+
+          cat > process.sh << 'EOF'
+#!/bin/bash
+awk '
+BEGIN { FS=OFS="" }
+function get_flag(c) {
+    flags["Czechia"]="🇨🇿"; flags["Czech Republic"]="🇨🇿";
+    flags["Finland"]="🇫🇮"; flags["France"]="🇫🇷";
+    flags["Germany"]="🇩🇪"; flags["Hong Kong"]="🇭🇰";
+    flags["Kazakhstan"]="🇰🇿"; flags["Lithuania"]="🇱🇹";
+    flags["Singapore"]="🇸🇬"; flags["Switzerland"]="🇨🇭";
+    flags["Netherlands"]="🇳🇱"; flags["The Netherlands"]="🇳🇱";
+    flags["Turkey"]="🇹🇷"; flags["United Kingdom"]="🇬🇧";
+    flags["UK"]="🇬🇧"; flags["United States"]="🇺🇸"; flags["USA"]="🇺🇸";
+    return flags[c] ? flags[c] : "🌍"
+}
+{
+    if ($0 ~ /^vless:\/\//) {
+        if (match($0, /#(.*)$/, a)) old = a[1]; else old = "Unknown";
+        sub(/#.*$/, "", $0);
+
+        if (match(old, /([A-Za-z ]+)[[:space:]]+([A-Za-z ]+)/, loc)) {
+            country = loc[1]; city = loc[2];
+        } else { country = "Unknown"; city = old; }
+
+        key = country "|" city;
+        count[key]++;
+
+        flag = get_flag(country);
+        if (count[key] == 1) {
+            name = flag " " city;
+        } else {
+            name = flag " " city " " count[key];
+        }
+        print $0 "#" name;
+    }
+}' original.txt > "$OUTPUT_FILE"
+EOF
+
+          chmod +x process.sh
+          ./process.sh
+
+          echo "处理完成，共 $(grep -c "^vless" "$OUTPUT_FILE") 个节点"
+
+      - name: 提交并推送更新
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          
+          if git diff --quiet "$OUTPUT_FILE"; then
+            echo "配置没有变化，跳过提交"
+          else
+            git add BLACK_VLESS_RUS_clean.txt
+            git commit -m "🔄 自动更新 VLESS 配置 $(date '+%Y-%m-%d %H:%M:%S')"
+            git push
+            echo "✅ 已成功更新并推送"
+          fi
