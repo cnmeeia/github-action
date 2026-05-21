@@ -1,11 +1,11 @@
+```yaml
 name: 更新 BLACK VLESS 配置
 
 on:
   schedule:
-    - cron: '0 */6 * * *'        # 每6小时自动更新一次
-  workflow_dispatch:              # 支持手动触发
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
 
-# 关键修复：显式赋予 Actions 允许写入仓库的权限
 permissions:
   contents: write
 
@@ -25,70 +25,132 @@ jobs:
           OUTPUT_FILE="BLACK_VLESS_RUS_clean.txt"
 
           echo "正在下载最新配置..."
-          curl -sL -o original.txt "$URL"
 
-          echo "处理配置（带旗帜 + 重复递增）..."
+          curl -sL "$URL" -o original.txt
+
+          if [ ! -s original.txt ]; then
+            echo "下载失败或文件为空"
+            exit 1
+          fi
+
+          echo "开始处理配置..."
 
           awk '
           BEGIN {
-              flags["Czechia"]="🇨🇿"; flags["Czech Republic"]="🇨🇿";
-              flags["Finland"]="🇫🇮"; flags["France"]="🇫🇷";
-              flags["Germany"]="🇩🇪"; flags["Hong Kong"]="🇭🇰";
-              flags["Kazakhstan"]="🇰🇿"; flags["Lithuania"]="🇱🇹";
-              flags["Singapore"]="🇸🇬"; flags["Switzerland"]="🇨🇭";
-              flags["Netherlands"]="🇳🇱"; flags["The Netherlands"]="🇳🇱";
-              flags["Turkey"]="🇹🇷"; flags["United Kingdom"]="🇬🇧";
-              flags["UK"]="🇬🇧"; flags["United States"]="🇺🇸"; flags["USA"]="🇺🇸";
+              flags["Czechia"]="🇨🇿";
+              flags["Czech Republic"]="🇨🇿";
+              flags["Finland"]="🇫🇮";
+              flags["France"]="🇫🇷";
+              flags["Germany"]="🇩🇪";
+              flags["Hong Kong"]="🇭🇰";
+              flags["Kazakhstan"]="🇰🇿";
+              flags["Lithuania"]="🇱🇹";
+              flags["Singapore"]="🇸🇬";
+              flags["Switzerland"]="🇨🇭";
+              flags["Netherlands"]="🇳🇱";
+              flags["The Netherlands"]="🇳🇱";
+              flags["Turkey"]="🇹🇷";
+              flags["United Kingdom"]="🇬🇧";
+              flags["UK"]="🇬🇧";
+              flags["United States"]="🇺🇸";
+              flags["USA"]="🇺🇸";
           }
-          /^vless:\/\// {
-              if (match($0, /#(.*)$/, expr)) {
-                  alias = expr[1];
-              } else {
-                  alias = "Unknown";
-              }
-              
-              sub(/#.*$/, "", $0);
 
-              if (match(alias, /^([A-Za-z ]+)[[:space:]]+([A-Za-z0-9 ]+)/, loc)) {
-                  country = loc[1];
-                  city = loc[2];
-              } else {
-                  country = "Unknown";
-                  city = alias;
+          /^vless:/// {
+
+              full = $0
+
+              alias = "Unknown"
+
+              pos = index(full, "#")
+
+              if (pos > 0) {
+                  alias = substr(full, pos + 1)
+                  full = substr(full, 1, pos - 1)
               }
 
-              gsub(/^[[:space:]]+|[[:space:]]+$/, "", country);
-              gsub(/^[[:space:]]+|[[:space:]]+$/, "", city);
+              gsub(/^[ \t]+|[ \t]+$/, "", alias)
 
-              key = country "|" city;
-              count[key]++;
+              country = "Unknown"
+              city = alias
 
-              flag = flags[country] ? flags[country] : "🌍";
-              
+              n = split(alias, arr, " ")
+
+              if (n >= 2) {
+
+                  country = arr[1]
+                  city = arr[2]
+
+                  if (arr[1] == "Hong" && arr[2] == "Kong") {
+                      country = "Hong Kong"
+                      city = arr[3]
+                  }
+
+                  if (arr[1] == "United" && arr[2] == "States") {
+                      country = "United States"
+                      city = arr[3]
+                  }
+
+                  if (arr[1] == "United" && arr[2] == "Kingdom") {
+                      country = "United Kingdom"
+                      city = arr[3]
+                  }
+
+                  if (arr[1] == "Czech" && arr[2] == "Republic") {
+                      country = "Czech Republic"
+                      city = arr[3]
+                  }
+
+                  if (arr[1] == "The" && arr[2] == "Netherlands") {
+                      country = "The Netherlands"
+                      city = arr[3]
+                  }
+              }
+
+              if (city == "" || city == " ") {
+                  city = "Unknown"
+              }
+
+              key = country "|" city
+              count[key]++
+
+              flag = "🌍"
+
+              if (country in flags) {
+                  flag = flags[country]
+              }
+
               if (count[key] == 1) {
-                  name = flag " " city;
+                  name = flag " " city
               } else {
-                  name = flag " " city " " count[key];
+                  name = flag " " city " " count[key]
               }
-              
-              print $0 "#" name;
-          }' original.txt > "$OUTPUT_FILE"
 
-          echo "处理完成，共 $(grep -c "^vless" "$OUTPUT_FILE") 个节点"
+              output = full "#" name
+
+              # 自动去重
+              if (!seen[output]++) {
+                  print output
+              }
+          }
+          ' original.txt > "$OUTPUT_FILE"
+
+          NODE_COUNT=$(grep -c "^vless://" "$OUTPUT_FILE")
+
+          echo "处理完成，共 ${NODE_COUNT} 个节点"
 
       - name: 提交并推送更新
         run: |
           OUTPUT_FILE="BLACK_VLESS_RUS_clean.txt"
-          
+
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          
-          # 关键修复：使用 git status --porcelain 规避首次运行或空改动的 fatal 错误
-          if [ -z "$(git status --porcelain "$OUTPUT_FILE")" ]; then
+
+          git add "$OUTPUT_FILE"
+
+          if git diff --cached --quiet; then
             echo "配置没有变化，跳过提交"
           else
-            git add "$OUTPUT_FILE"
             git commit -m "🔄 自动更新 VLESS 配置 $(date '+%Y-%m-%d %H:%M:%S')"
-            git push
+            git push origin HEAD
             echo "✅ 已成功更新并推送"
-          fi
