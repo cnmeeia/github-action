@@ -25,46 +25,58 @@ jobs:
 
           echo "处理配置（带旗帜 + 重复递增）..."
 
-          cat > process.sh << 'EOF'
-#!/bin/bash
-awk '
-BEGIN { FS=OFS="" }
-function get_flag(c) {
-    flags["Czechia"]="🇨🇿"; flags["Czech Republic"]="🇨🇿";
-    flags["Finland"]="🇫🇮"; flags["France"]="🇫🇷";
-    flags["Germany"]="🇩🇪"; flags["Hong Kong"]="🇭🇰";
-    flags["Kazakhstan"]="🇰🇿"; flags["Lithuania"]="🇱🇹";
-    flags["Singapore"]="🇸🇬"; flags["Switzerland"]="🇨🇭";
-    flags["Netherlands"]="🇳🇱"; flags["The Netherlands"]="🇳🇱";
-    flags["Turkey"]="🇹🇷"; flags["United Kingdom"]="🇬🇧";
-    flags["UK"]="🇬🇧"; flags["United States"]="🇺🇸"; flags["USA"]="🇺🇸";
-    return flags[c] ? flags[c] : "🌍"
-}
-{
-    if ($0 ~ /^vless:\/\//) {
-        if (match($0, /#(.*)$/, a)) old = a[1]; else old = "Unknown";
-        sub(/#.*$/, "", $0);
+          # 直接使用 awk 处理，增强了正则容错和空格清理
+          awk '
+          BEGIN {
+              # 初始化国旗字典
+              flags["Czechia"]="🇨🇿"; flags["Czech Republic"]="🇨🇿";
+              flags["Finland"]="🇫🇮"; flags["France"]="🇫🇷";
+              flags["Germany"]="🇩🇪"; flags["Hong Kong"]="🇭🇰";
+              flags["Kazakhstan"]="🇰🇿"; flags["Lithuania"]="🇱🇹";
+              flags["Singapore"]="🇸🇬"; flags["Switzerland"]="🇨🇭";
+              flags["Netherlands"]="🇳🇱"; flags["The Netherlands"]="🇳🇱";
+              flags["Turkey"]="🇹🇷"; flags["United Kingdom"]="🇬🇧";
+              flags["UK"]="🇬🇧"; flags["United States"]="🇺🇸"; flags["USA"]="🇺🇸";
+          }
+          /^vless:\/\// {
+              # 1. 提取 # 后面的原始别名
+              if (match($0, /#(.*)$/, expr)) {
+                  alias = expr[1];
+              } else {
+                  alias = "Unknown";
+              }
+              
+              # 移除 URL 后面的旧别名
+              sub(/#.*$/, "", $0);
 
-        if (match(old, /([A-Za-z ]+)[[:space:]]+([A-Za-z ]+)/, loc)) {
-            country = loc[1]; city = loc[2];
-        } else { country = "Unknown"; city = old; }
+              # 2. 智能解析 [国家] [城市]
+              # 匹配规则：前一部分为英文字母/空格，后一部分为英文字母/数字/空格
+              if (match(alias, /^([A-Za-z ]+)[[:space:]]+([A-Za-z0-9 ]+)/, loc)) {
+                  country = loc[1];
+                  city = loc[2];
+              } else {
+                  country = "Unknown";
+                  city = alias;
+              }
 
-        key = country "|" city;
-        count[key]++;
+              # 3. 清理提取出来的内容的前后空格 (Trim)
+              gsub(/^[[:space:]]+|[[:space:]]+$/, "", country);
+              gsub(/^[[:space:]]+|[[:space:]]+$/, "", city);
 
-        flag = get_flag(country);
-        if (count[key] == 1) {
-            name = flag " " city;
-        } else {
-            name = flag " " city " " count[key];
-        }
-        print $0 "#" name;
-    }
-}' original.txt > "$OUTPUT_FILE"
-EOF
+              # 4. 计算重复并生成新名称
+              key = country "|" city;
+              count[key]++;
 
-          chmod +x process.sh
-          ./process.sh
+              flag = flags[country] ? flags[country] : "🌍";
+              
+              if (count[key] == 1) {
+                  name = flag " " city;
+              } else {
+                  name = flag " " city " " count[key];
+              }
+              
+              print $0 "#" name;
+          }' original.txt > "$OUTPUT_FILE"
 
           echo "处理完成，共 $(grep -c "^vless" "$OUTPUT_FILE") 个节点"
 
