@@ -24,11 +24,19 @@ jobs:
           OUTPUT_FILE="BLACK_VLESS_RUS_clean.txt"
 
           echo "正在下载最新配置..."
+          curl -fsSL "$URL" -o raw.txt || { echo "下载失败"; exit 1; }
 
-          curl -sL "$URL" -o original.txt
+          # 检查是否是 Base64 编码
+          if head -1 raw.txt | grep -qE '^[A-Za-z0-9+/=]+$'; then
+            echo "检测到 Base64 编码，正在解码..."
+            base64 -d raw.txt > original.txt 2>/dev/null || { echo "Base64 解码失败"; exit 1; }
+          else
+            echo "文件已是明文格式"
+            mv raw.txt original.txt
+          fi
 
           if [ ! -s original.txt ]; then
-            echo "下载失败或文件为空"
+            echo "文件为空"
             exit 1
           fi
 
@@ -36,107 +44,168 @@ jobs:
 
           awk '
           BEGIN {
+              # 国旗映射（完善版）
+              flags["Albania"]="🇦🇱";
+              flags["Australia"]="🇦🇺";
+              flags["Austria"]="🇦🇹";
+              flags["Belgium"]="🇧🇪";
+              flags["Brazil"]="🇧🇷";
+              flags["Bulgaria"]="🇧🇬";
+              flags["Canada"]="🇨🇦";
               flags["Czechia"]="🇨🇿";
               flags["Czech Republic"]="🇨🇿";
+              flags["Denmark"]="🇩🇰";
+              flags["Egypt"]="🇪🇬";
+              flags["Estonia"]="🇪🇪";
               flags["Finland"]="🇫🇮";
               flags["France"]="🇫🇷";
               flags["Germany"]="🇩🇪";
+              flags["Greece"]="🇬🇷";
               flags["Hong Kong"]="🇭🇰";
+              flags["Hungary"]="🇭🇺";
+              flags["Iceland"]="🇮🇸";
+              flags["India"]="🇮🇳";
+              flags["Indonesia"]="🇮🇩";
+              flags["Ireland"]="🇮🇪";
+              flags["Israel"]="🇮🇱";
+              flags["Italy"]="🇮🇹";
+              flags["Japan"]="🇯🇵";
               flags["Kazakhstan"]="🇰🇿";
+              flags["Latvia"]="🇱🇻";
               flags["Lithuania"]="🇱🇹";
-              flags["Singapore"]="🇸🇬";
-              flags["Switzerland"]="🇨🇭";
+              flags["Luxembourg"]="🇱🇺";
+              flags["Malaysia"]="🇲🇾";
               flags["Netherlands"]="🇳🇱";
               flags["The Netherlands"]="🇳🇱";
+              flags["New Zealand"]="🇳🇿";
+              flags["Norway"]="🇳🇴";
+              flags["Philippines"]="🇵🇭";
+              flags["Poland"]="🇵🇱";
+              flags["Portugal"]="🇵🇹";
+              flags["Romania"]="🇷🇴";
+              flags["Saudi Arabia"]="🇸🇦";
+              flags["Serbia"]="🇷🇸";
+              flags["Singapore"]="🇸🇬";
+              flags["Slovakia"]="🇸🇰";
+              flags["Slovenia"]="🇸🇮";
+              flags["South Africa"]="🇿🇦";
+              flags["South Korea"]="🇰🇷";
+              flags["Spain"]="🇪🇸";
+              flags["Sweden"]="🇸🇪";
+              flags["Switzerland"]="🇨🇭";
+              flags["Taiwan"]="🇹🇼";
+              flags["Thailand"]="🇹🇭";
               flags["Turkey"]="🇹🇷";
+              flags["Ukraine"]="🇺🇦";
+              flags["United Arab Emirates"]="🇦🇪";
               flags["United Kingdom"]="🇬🇧";
               flags["UK"]="🇬🇧";
               flags["United States"]="🇺🇸";
               flags["USA"]="🇺🇸";
+              flags["Vietnam"]="🇻🇳";
+
+              # 常见多词国家的识别
+              multi_word["Hong Kong"]="Hong Kong"
+              multi_word["United States"]="United States"
+              multi_word["United Kingdom"]="United Kingdom"
+              multi_word["Czech Republic"]="Czech Republic"
+              multi_word["The Netherlands"]="The Netherlands"
+              multi_word["South Korea"]="South Korea"
+              multi_word["Saudi Arabia"]="Saudi Arabia"
+              multi_word["South Africa"]="South Africa"
+              multi_word["New Zealand"]="New Zealand"
+              multi_word["United Arab Emirates"]="United Arab Emirates"
           }
 
-          /^vless:\/\// {
+          # 匹配 vless:// 开头的行（可能被包裹在引号或其他字符中）
+          {
+              line = $0
+              while (match(line, /vless:\/\/[^[:space:]]+/)) {
+                  full = substr(line, RSTART, RLENGTH)
+                  line = substr(line, RSTART + RLENGTH)
 
-              full = $0
-
-              alias = "Unknown"
-
-              pos = index(full, "#")
-
-              if (pos > 0) {
-                  alias = substr(full, pos + 1)
-                  full = substr(full, 1, pos - 1)
-              }
-
-              gsub(/^[ \t]+|[ \t]+$/, "", alias)
-
-              country = "Unknown"
-              city = alias
-
-              n = split(alias, arr, " ")
-
-              if (n >= 2) {
-
-                  country = arr[1]
-                  city = arr[2]
-
-                  if (arr[1] == "Hong" && arr[2] == "Kong") {
-                      country = "Hong Kong"
-                      city = arr[3]
+                  # 提取别名
+                  alias = "Unknown"
+                  pos = index(full, "#")
+                  if (pos > 0) {
+                      alias = substr(full, pos + 1)
+                      full = substr(full, 1, pos - 1)
                   }
 
-                  if (arr[1] == "United" && arr[2] == "States") {
-                      country = "United States"
-                      city = arr[3]
+                  # URL 解码别名（处理 %20 等）
+                  gsub(/\+/, " ", alias)
+                  gsub(/%20/, " ", alias)
+                  gsub(/%23/, "#", alias)
+                  gsub(/%2F/, "/", alias)
+
+                  gsub(/^[ \t]+|[ \t]+$/, "", alias)
+
+                  # 智能解析国家/城市
+                  country = ""
+                  city = ""
+
+                  # 先检查多词国家
+                  found = 0
+                  for (mw in multi_word) {
+                      if (index(alias, mw) == 1) {
+                          country = mw
+                          rest = substr(alias, length(mw) + 1)
+                          gsub(/^[ \t]+/, "", rest)
+                          # 提取城市（第一个单词）
+                          split(rest, parts, " ")
+                          city = parts[1]
+                          found = 1
+                          break
+                      }
                   }
 
-                  if (arr[1] == "United" && arr[2] == "Kingdom") {
-                      country = "United Kingdom"
-                      city = arr[3]
+                  # 普通两词格式："国家 城市"
+                  if (!found && match(alias, /^[A-Za-z]+ [A-Za-z]/)) {
+                      split(alias, parts, " ")
+                      country = parts[1]
+                      city = parts[2]
                   }
 
-                  if (arr[1] == "Czech" && arr[2] == "Republic") {
-                      country = "Czech Republic"
-                      city = arr[3]
+                  # 单词格式：只有城市名
+                  if (!found && country == "") {
+                      city = alias
                   }
 
-                  if (arr[1] == "The" && arr[2] == "Netherlands") {
-                      country = "The Netherlands"
-                      city = arr[3]
+                  # 清理城市名
+                  gsub(/[^A-Za-z\u4e00-\u9fa5-]/, "", city)
+                  if (city == "") city = "Server"
+
+                  # 获取国旗
+                  flag = "🌍"
+                  if (country in flags) flag = flags[country]
+                  if (country == "") flag = "🌍"
+
+                  # 处理重复城市
+                  key = (country == "" ? city : country "|" city)
+                  count[key]++
+
+                  if (count[key] > 1) {
+                      name = flag " " city " " count[key]
+                  } else {
+                      name = flag " " city
                   }
-              }
 
-              if (city == "" || city == " ") {
-                  city = "Unknown"
-              }
+                  output = full "#" name
 
-              key = country "|" city
-              count[key]++
-
-              flag = "🌍"
-
-              if (country in flags) {
-                  flag = flags[country]
-              }
-
-              if (count[key] == 1) {
-                  name = flag " " city
-              } else {
-                  name = flag " " city " " count[key]
-              }
-
-              output = full "#" name
-
-              # 自动去重
-              if (!seen[output]++) {
-                  print output
+                  if (!seen[output]++) {
+                      print output
+                  }
               }
           }
           ' original.txt > "$OUTPUT_FILE"
 
-          NODE_COUNT=$(grep -c "^vless://" "$OUTPUT_FILE")
-
+          NODE_COUNT=$(grep -c "^vless://" "$OUTPUT_FILE" 2>/dev/null || echo 0)
           echo "处理完成，共 ${NODE_COUNT} 个节点"
+
+          if [ "$NODE_COUNT" -eq 0 ]; then
+            echo "❌ 错误：没有提取到任何有效节点"
+            exit 1
+          fi
 
       - name: 提交并推送更新
         run: |
@@ -148,8 +217,17 @@ jobs:
           git add "$OUTPUT_FILE"
 
           if git diff --cached --quiet; then
-            echo "配置没有变化，跳过提交"
+            echo "📭 配置没有变化，跳过提交"
           else
-            git commit -m "🔄 自动更新 VLESS 配置 $(date '+%Y-%m-%d %H:%M:%S')"
+            git commit -m "🔄 自动更新 VLESS 配置 ($(date '+%Y-%m-%d %H:%M:%S'))"
             git push origin HEAD
             echo "✅ 已成功更新并推送"
+          fi
+
+      - name: 上传配置为 Artifact（可选）
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: vless-config
+          path: BLACK_VLESS_RUS_clean.txt
+          retention-days: 3
