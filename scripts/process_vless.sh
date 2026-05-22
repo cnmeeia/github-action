@@ -35,7 +35,7 @@ awk '
         if (seen[url]++) continue
 
         count++
-        output = url "🇷🇺 公益 " count
+        output = url "#🇷🇺 公益 " count
         print output
     }
 }
