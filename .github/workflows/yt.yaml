@@ -32,7 +32,16 @@ jobs:
         run: |
           mkdir -p downloads
           cd downloads
-          yt-dlp -f "bv*+ba/b" --merge-output-format mp4 "${VIDEO_URL}"
+          
+          # 写入 cookies 文件
+          echo "${{ secrets.YOUTUBE_COOKIES }}" > cookies.txt
+          
+          yt-dlp -f "bv*+ba/b" --merge-output-format mp4 \
+            --cookies cookies.txt \
+            "${VIDEO_URL}"
+          
+          # 清理 cookies
+          rm -f cookies.txt
           
           # 获取文件名
           FILE=$(ls -1 *.mp4 | head -1)
