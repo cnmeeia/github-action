@@ -11,11 +11,11 @@ on:
 jobs:
   process-video:
     runs-on: ubuntu-latest
+    timeout-minutes: 120
 
     steps:
       - uses: actions/checkout@v4
 
-      # Step 0：安装 ffmpeg & yt-dlp
       - name: Setup FFmpeg
         uses: FedericoCarboni/setup-ffmpeg@v3
 
@@ -24,112 +24,27 @@ jobs:
         with:
           ffmpeg: true
 
-      # Step 1：yt-dlp 下载
-      - name: Download 4K video with yt-dlp
-        id: yt_dlp
+      # Step 1：下载 4K 视频（最高码率）
+      - name: Download video with yt-dlp
+        id: download
         env:
           VIDEO_URL: ${{ inputs.video_url }}
         run: |
           mkdir -p downloads
           cd downloads
+          yt-dlp -f "bv*+ba/b" --merge-output-format mp4 "${VIDEO_URL}"
+          
+          # 获取文件名
+          FILE=$(ls -1 *.mp4 | head -1)
+          echo "filename=${FILE}" >> "$GITHUB_OUTPUT"
+          echo "Downloaded: ${FILE}"
+          ls -lh "${FILE}"
 
-          FINAL_PATH=$(yt-dlp \
-            -f "bv[height=2160]+ba/bv[height>=2160]+ba/bv+ba/b" \
-            --merge-output-format mkv \
-            --write-subs \
-            --write-auto-subs \
-            --sub-langs "zh-Hans,en" \
-            --embed-subs \
-            --embed-metadata \
-            -o "%(title)s [%(id)s].%(ext)s" \
-            --print after_move:filepath \
-            "$VIDEO_URL" \
-            | tail -n 1)
-
-          FINAL_NAME=$(basename "${FINAL_PATH}")
-
-          echo "final_path=${FINAL_PATH}" >> $GITHUB_OUTPUT
-          echo "final_name=${FINAL_NAME}" >> $GITHUB_OUTPUT
-
-      # Step 2：ffmpeg 封装/处理（安全环境变量注入 + 删原文件防满盘）
-      - name: Merge / post-process with ffmpeg
-        id: ffmpeg_merge
-        env:
-          INPUT: ${{ steps.yt_dlp.outputs.final_path }}
-          BASENAME: ${{ steps.yt_dlp.outputs.final_name }}
-        run: |
-          cd downloads
-
-          OUTPUT="${BASENAME%.*}-final.mp4"
-
-          ffmpeg -y \
-            -i "$INPUT" \
-            -c:v copy \
-            -c:a copy \
-            "$OUTPUT"
-
-          # 关键：转码完成后及时删除原文件，释放磁盘空间
-          rm -f "$INPUT"
-
-          echo "merged_path=$(pwd)/$OUTPUT" >> $GITHUB_OUTPUT
-          echo "merged_name=$OUTPUT" >> $GITHUB_OUTPUT
-
-      # Step 3：上传到 Cloudflare R2
-      - name: Install AWS CLI
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y awscli
-
-      - name: Configure AWS for R2
-        run: |
-          aws configure set aws_access_key_id "${{ secrets.R2_ACCESS_KEY_ID }}"
-          aws configure set aws_secret_access_key "${{ secrets.R2_SECRET_ACCESS_KEY }}"
-          aws configure set default.region us-east-1
-
-      - name: Upload merged file to R2
-        id: r2_upload
-        env:
-          MERGED_PATH: ${{ steps.ffmpeg_merge.outputs.merged_path }}
-          MERGED_NAME: ${{ steps.ffmpeg_merge.outputs.merged_name }}
-        run: |
-          DATE_PREFIX=$(date +'%Y/%m/%d')
-          OBJECT_KEY="videos/${DATE_PREFIX}/${MERGED_NAME}"
-
-          aws s3 cp \
-            "$MERGED_PATH" \
-            "s3://${{ secrets.R2_BUCKET }}/${OBJECT_KEY}" \
-            --endpoint-url "${{ secrets.R2_ENDPOINT_URL }}"
-
-          FILE_URL="${{ secrets.R2_PUBLIC_BASE_URL }}/${OBJECT_KEY}"
-
-          echo "object_key=${OBJECT_KEY}" >> $GITHUB_OUTPUT
-          echo "file_url=${FILE_URL}" >> $GITHUB_OUTPUT
-
-      # Step 4：使用 jq 构造稳健的 JSON 并发送 Bark 通知
-      - name: Send Bark notification via curl
-        if: always()
-        env:
-          FILE_URL: ${{ steps.r2_upload.outputs.file_url }}
-          MERGED_NAME: ${{ steps.ffmpeg_merge.outputs.merged_name }}
-          BARK_SERVER_URL: ${{ secrets.BARK_SERVER_URL }}
-          BARK_DEVICE_KEY: ${{ secrets.BARK_DEVICE_KEY }}
-        run: |
-          # 安全构造 JSON 实体
-          PAYLOAD=$(jq -n \
-            --arg title "4K 视频处理完成" \
-            --arg body "已上传到 R2: ${MERGED_NAME}" \
-            --arg device_key "$BARK_DEVICE_KEY" \
-            --arg url "$FILE_URL" \
-            '{
-              title: $title,
-              body: $body,
-              device_key: $device_key,
-              badge: 1,
-              sound: "minuet.caf",
-              group: "R2-Video",
-              url: $url
-            }')
-
-          curl -X POST "${BARK_SERVER_URL}/push" \
-            -H "Content-Type: application/json; charset=utf-8" \
-            -d "$PAYLOAD"
+      # Step 2：上传到 Artifacts
+      - name: Upload video artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: 4k-video
+          path: downloads/*.mp4
+          retention-days: 7
+          compression-level: 0  
