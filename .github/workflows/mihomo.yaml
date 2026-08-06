@@ -1,0 +1,51 @@
+name: Build macOS M1 DMG
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  build-macos-arm64:
+    runs-on: macos-latest
+
+    steps:
+      - name: Git clone
+        run: |
+          rm -rf mihomo
+          git clone https://cnb.cool/cnmeeia/mihomo mihomo
+          cd mihomo
+          git checkout "${GITHUB_REF_NAME}"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "lts/*"
+
+      - name: Install frontend dependencies
+        run: |
+          cd mihomo
+          npm ci
+
+      - name: (Optional) Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - name: Build
+        run: |
+          cd mihomo
+          npm run app:build
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-arm64-dmg
+          path: |
+            mihomo/**/*.dmg
+          if-no-files-found: warn
+          retention-days: 14
