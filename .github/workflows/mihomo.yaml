@@ -41,12 +41,13 @@ jobs:
           cd mihomo
           npm run app:build
 
-      - name: Upload DMG artifact
+      - name: Upload DMG artifact (fallback)
+        if: ${{ failure() || github.event_name == 'workflow_dispatch' }}
         uses: actions/upload-artifact@v4
         with:
           name: macos-arm64-dmg
-          path: |
-            mihomo/**/*.dmg
+          path: ${{ github.workspace }}/mihomo/src-tauri/target/release/bundle/dmg/miho_0.1.0_aarch64.dmg
           if-no-files-found: warn
           retention-days: 14
+
 
