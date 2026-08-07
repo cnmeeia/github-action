@@ -4,31 +4,21 @@ on:
   push:
     tags:
       - "v*"
-
   workflow_dispatch:
-
 
 permissions:
   contents: write
 
-
 jobs:
-
   build-macos-arm64:
-
     runs-on: macos-14
 
-
     steps:
-
-
       # =====================
-      # Checkout
+      # Checkout Repository
       # =====================
       - name: Checkout
         uses: actions/checkout@v4
-
-
 
       # =====================
       # Clone mihomo
@@ -36,34 +26,22 @@ jobs:
       - name: Clone mihomo
         run: |
           git clone https://cnb.cool/cnmeeia/mihomo mihomo
-
           cd mihomo
-
           git checkout "${GITHUB_REF_NAME}"
-
           git rev-parse --short HEAD
-
           ls -la
 
-
-
       # =====================
-      # Rust
+      # Setup Environment
       # =====================
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "mihomo/src-tauri"
 
-
-      - name: Install Rust target
-        run: |
-          rustup target add aarch64-apple-darwin
-
-
-
-      # =====================
-      # Node
-      # =====================
       - name: Install Node
         uses: actions/setup-node@v4
         with:
@@ -71,105 +49,68 @@ jobs:
           cache: npm
           cache-dependency-path: mihomo/package-lock.json
 
-
-
       # =====================
-      # npm
+      # Install Dependencies
       # =====================
-      - name: Install dependencies
+      - name: Install npm dependencies
         working-directory: mihomo
-        run: |
-          npm ci
+        run: npm ci
 
-
-
-      # =====================
-      # tools
-      # =====================
-      - name: Install tools
-        run: |
-          brew install create-dmg
-
-
+      - name: Install macOS tools
+        run: brew install create-dmg
 
       # =====================
-      # helper
+      # Build Helper & Kernel
       # =====================
       - name: Build Helper Tool
         working-directory: mihomo
         run: |
-
+          # 动态热修复 1：将不可变常量 let 替换为可变变量 var，修复指针报错
+          sed -i '' 's/let socketAddr = sockaddr_un/var socketAddr = sockaddr_un/g' xcode/MihomoHelper/MihomoHelper.swift
+          
+          # 动态热修复 2：注释掉不存在的 terminateSignal 属性，修复不存在的成员报错
+          sed -i '' 's/process.terminateSignal = SIGUSR1/\/\/ process.terminateSignal = SIGUSR1/g' xcode/MihomoHelper/MihomoHelper.swift
+          
+          # 修复完成后，执行原本的编译脚本
           bash scripts/build-helper.sh src-tauri/resources
+          
+          # 列出产物确认编译成功
+          ls -lh src-tauri/resources/mihomo-helper src-tauri/resources/mihomo-helperctl
 
-
-          ls -lh \
-          src-tauri/resources/mihomo-helper \
-          src-tauri/resources/mihomo-helperctl
-
-
-          rm -f \
-          src-tauri/resources/mihomo-helper \
-          src-tauri/resources/mihomo-helperctl
-
-
-
-      # =====================
-      # kernel
-      # =====================
       - name: Fetch mihomo kernel
         working-directory: mihomo
-        run: |
-
-          bash scripts/fetch-kernel.sh
-
-
+        run: bash scripts/fetch-kernel.sh
 
       # =====================
-      # Tauri
+      # Build Tauri App
       # =====================
       - name: Build Tauri
         working-directory: mihomo
-        run: |
-
-          npm run app:build
-
-
+        run: npm run app:build
 
       # =====================
-      # output
+      # Verification
       # =====================
       - name: List output
         working-directory: mihomo
-        run: |
-
-          find src-tauri/target/release/bundle -type f
-
-
+        run: find src-tauri/target/release/bundle -type f
 
       # =====================
-      # artifact
+      # Upload Artifact & Release
       # =====================
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-
           name: mihomo-macos-arm64
-
           path: |
             mihomo/src-tauri/target/release/bundle/macos/*.app
             mihomo/src-tauri/target/release/bundle/dmg/*.dmg
             mihomo/src-tauri/target/release/bundle/macos/*.tar.gz
 
-
-
-      # =====================
-      # release
-      # =====================
       - name: Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
-
           files: |
             mihomo/src-tauri/target/release/bundle/dmg/*.dmg
             mihomo/src-tauri/target/release/bundle/macos/*.tar.gz
