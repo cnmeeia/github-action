@@ -36,7 +36,6 @@ jobs:
       # =====================
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
-        # 注: macos-14 是原生 ARM64 机器，默认 target 即为 aarch64-apple-darwin
 
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
@@ -66,15 +65,38 @@ jobs:
       - name: Build Helper Tool
         working-directory: mihomo
         run: |
-          # 源码已修复，直接执行编译脚本即可
-          bash scripts/build-helper.sh src-tauri/resources
+          # --- 修复 1：MihomoHelper (daemon) ---
+          sed -i '' 's/let socketAddr = sockaddr_un/var socketAddr = sockaddr_un/g' xcode/MihomoHelper/MihomoHelper.swift
+          sed -i '' 's/process.terminateSignal = SIGUSR1/\/\/ process.terminateSignal = SIGUSR1/g' xcode/MihomoHelper/MihomoHelper.swift
           
-          # 列出产物确认编译成功
+          # --- 修复 2：mihomo-helperctl (CLI) ---
+          sed -i '' 's/let addr = sockaddr_un/var addr = sockaddr_un/g' xcode/MihomoHelper/mihomo-helperctl.swift
+          sed -i '' 's/let request = \["kind"/let request: [String: Any] = ["kind"/g' xcode/MihomoHelper/mihomo-helperctl.swift
+          
+          bash scripts/build-helper.sh src-tauri/resources
           ls -lh src-tauri/resources/mihomo-helper src-tauri/resources/mihomo-helperctl
 
       - name: Fetch mihomo kernel
         working-directory: mihomo
         run: bash scripts/fetch-kernel.sh
+
+      # =====================
+      # Fix Cargo.toml
+      # =====================
+      - name: Patch Cargo.toml default-run
+        working-directory: mihomo/src-tauri
+        run: |
+          # 1. 动态提取 Cargo.toml 中的包名
+          PKG_NAME=$(grep -m 1 '^name = ' Cargo.toml | cut -d '"' -f 2)
+          echo "Found package name: $PKG_NAME"
+          
+          # 2. 使用 sed 动态插入 default-run 参数
+          sed -i '' "/\[package\]/a\\
+          default-run = \"$PKG_NAME\"
+          " Cargo.toml
+          
+          # 3. 打印前 15 行确认修改成功
+          head -n 15 Cargo.toml
 
       # =====================
       # Build Tauri App
