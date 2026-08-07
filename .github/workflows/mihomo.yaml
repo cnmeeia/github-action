@@ -86,17 +86,21 @@ jobs:
       - name: Patch Cargo.toml default-run
         working-directory: mihomo/src-tauri
         run: |
-          # 1. 动态提取 Cargo.toml 中的包名
           PKG_NAME=$(grep -m 1 '^name = ' Cargo.toml | cut -d '"' -f 2)
           echo "Found package name: $PKG_NAME"
-          
-          # 2. 使用 sed 动态插入 default-run 参数
           sed -i '' "/\[package\]/a\\
           default-run = \"$PKG_NAME\"
           " Cargo.toml
-          
-          # 3. 打印前 15 行确认修改成功
           head -n 15 Cargo.toml
+
+      # =====================
+      # Fix Rust Code
+      # =====================
+      - name: Patch Rust Code
+        working-directory: mihomo/src-tauri
+        run: |
+          sed -i '' 's/ksm_error_message(out_error)/ksm_error_message(\&mut out_error)/g' src/daemon.rs
+          sed -i '' 's/mib.as_ptr()/mib.as_ptr() as *mut i32/g' src/kernel.rs
 
       # =====================
       # Build Tauri App
