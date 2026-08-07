@@ -4,50 +4,84 @@ on:
   push:
     tags:
       - "v*"
-  workflow_dispatch: {}
+  workflow_dispatch:
 
 permissions:
   contents: write
 
+
 jobs:
+
   build-macos-arm64:
-    runs-on: macos-latest
+
+    runs-on: macos-14
+
 
     steps:
-      - name: Git clone
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+
+      - name: Clone mihomo
         run: |
-          rm -rf mihomo
           git clone https://cnb.cool/cnmeeia/mihomo mihomo
           cd mihomo
           git checkout "${GITHUB_REF_NAME}"
 
-      - name: Setup Node.js
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+
+      - name: Rust target
+        run: |
+          rustup target add aarch64-apple-darwin
+
+
+      - name: Install Node
         uses: actions/setup-node@v4
         with:
-          node-version: "lts/*"
+          node-version: 22
+          cache: npm
 
-      - name: Install frontend dependencies
+
+      - name: Install dependencies
         run: |
-          cd mihomo
-          npm ci
+          npm install
 
-      - name: (Optional) Setup Rust toolchain
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-apple-darwin
 
-      - name: Build
+      - name: Install tools
         run: |
-          cd mihomo
+          brew install create-dmg
+
+
+      - name: Build Helper Tool
+        run: |
+          bash scripts/build-helper.sh src-tauri/resources
+
+          ls -lh \
+          src-tauri/resources/mihomo-helper \
+          src-tauri/resources/mihomo-helperctl
+
+          rm -f \
+          src-tauri/resources/mihomo-helper \
+          src-tauri/resources/mihomo-helperctl
+
+
+      - name: Fetch mihomo kernel
+        run: |
+          bash scripts/fetch-kernel.sh
+
+
+      - name: Build Tauri
+        run: |
           npm run app:build
 
-      - name: Upload DMG artifact (fallback)
-        if: ${{ failure() || github.event_name == 'workflow_dispatch' }}
-        uses: actions/upload-artifact@v4
+
+      - name: Release
+        uses: softprops/action-gh-release@v2
         with:
-          name: macos-arm64-dmg
-          path: ${{ github.workspace }}/mihomo/src-tauri/target/release/bundle/dmg/miho_0.1.0_aarch64.dmg
-          if-no-files-found: warn
-          retention-days: 14
-
-
+          files: |
+            src-tauri/target/release/bundle/dmg/*.dmg
+            src-tauri/target/release/bundle/macos/*.tar.gz
