@@ -44,12 +44,12 @@ jobs:
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: mihomo/package-lock.json
 
 
       - name: Install dependencies
-        run: |
-          npm install
-
+        working-directory: mihomo
+        run: npm ci
 
       - name: Install tools
         run: |
