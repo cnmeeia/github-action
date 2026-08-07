@@ -1,137 +1,71 @@
-name: Build macOS M1 mihomo
+name: Build macOS ARM64 DMG
 
 on:
   push:
     tags:
       - "v*"
+
   workflow_dispatch:
 
 permissions:
   contents: write
 
+
 jobs:
-  build-macos-arm64:
-    runs-on: macos-14
+  build:
+
+    runs-on: macos-latest
 
     steps:
-      # =====================
-      # Checkout Repository
-      # =====================
-      - name: Checkout
-        uses: actions/checkout@v4
 
-      # =====================
-      # Clone mihomo
-      # =====================
-      - name: Clone mihomo
+      - name: Checkout source
         run: |
-          git clone https://cnb.cool/cnmeeia/mihomo mihomo
-          cd mihomo
-          git checkout "${GITHUB_REF_NAME}"
-          git rev-parse --short HEAD
-          ls -la
+          git clone \
+          --depth=1 \
+          --branch "${GITHUB_REF_NAME}" \
+          https://cnb.cool/cnmeeia/mihomo.git mihomo
 
-      # =====================
-      # Setup Environment
-      # =====================
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
 
-      - name: Rust Cache
-        uses: Swatinem/rust-cache@v2
-        with:
-          workspaces: "mihomo/src-tauri"
-
-      - name: Install Node
+      - name: Setup Node
         uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: mihomo/package-lock.json
 
-      # =====================
-      # Install Dependencies
-      # =====================
-      - name: Install npm dependencies
-        working-directory: mihomo
-        run: npm ci
 
-      - name: Install macOS tools
-        run: brew install create-dmg
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
 
-      # =====================
-      # Build Helper & Kernel
-      # =====================
-      - name: Build Helper Tool
-        working-directory: mihomo
+
+      - name: Setup Xcode
         run: |
-          # --- 修复 1：MihomoHelper (daemon) ---
-          sed -i '' 's/let socketAddr = sockaddr_un/var socketAddr = sockaddr_un/g' xcode/MihomoHelper/MihomoHelper.swift
-          sed -i '' 's/process.terminateSignal = SIGUSR1/\/\/ process.terminateSignal = SIGUSR1/g' xcode/MihomoHelper/MihomoHelper.swift
-          
-          # --- 修复 2：mihomo-helperctl (CLI) ---
-          sed -i '' 's/let addr = sockaddr_un/var addr = sockaddr_un/g' xcode/MihomoHelper/mihomo-helperctl.swift
-          sed -i '' 's/let request = \["kind"/let request: [String: Any] = ["kind"/g' xcode/MihomoHelper/mihomo-helperctl.swift
-          
-          bash scripts/build-helper.sh src-tauri/resources
-          ls -lh src-tauri/resources/mihomo-helper src-tauri/resources/mihomo-helperctl
+          sudo xcode-select -switch /Applications/Xcode.app
+          xcodebuild -version
 
-      - name: Fetch mihomo kernel
-        working-directory: mihomo
-        run: bash scripts/fetch-kernel.sh
 
-      # =====================
-      # Fix Cargo.toml
-      # =====================
-      - name: Patch Cargo.toml default-run
-        working-directory: mihomo/src-tauri
+      - name: Install dependencies
         run: |
-          PKG_NAME=$(grep -m 1 '^name = ' Cargo.toml | cut -d '"' -f 2)
-          echo "Found package name: $PKG_NAME"
-          sed -i '' "/\[package\]/a\\
-          default-run = \"$PKG_NAME\"
-          " Cargo.toml
-          head -n 15 Cargo.toml
+          cd mihomo
+          npm install
 
-      # =====================
-      # Fix Rust Code
-      # =====================
-      - name: Patch Rust Code
-        working-directory: mihomo/src-tauri
+
+      - name: Build DMG
         run: |
-          sed -i '' 's/ksm_error_message(out_error)/ksm_error_message(\&mut out_error)/g' src/daemon.rs
-          sed -i '' 's/mib.as_ptr()/mib.as_ptr() as *mut i32/g' src/kernel.rs
+          cd mihomo
+          npm run app:build
 
-      # =====================
-      # Build Tauri App
-      # =====================
-      - name: Build Tauri
-        working-directory: mihomo
-        run: npm run app:build
 
-      # =====================
-      # Verification
-      # =====================
-      - name: List output
-        working-directory: mihomo
-        run: find src-tauri/target/release/bundle -type f
+      - name: Find DMG
+        run: |
+          find mihomo -name "*.dmg"
 
-      # =====================
-      # Upload Artifact & Release
-      # =====================
-      - name: Upload artifact
+
+      - name: Upload DMG
         uses: actions/upload-artifact@v4
         with:
           name: mihomo-macos-arm64
           path: |
-            mihomo/src-tauri/target/release/bundle/macos/*.app
-            mihomo/src-tauri/target/release/bundle/dmg/*.dmg
-            mihomo/src-tauri/target/release/bundle/macos/*.tar.gz
-
-      - name: Release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: |
-            mihomo/src-tauri/target/release/bundle/dmg/*.dmg
-            mihomo/src-tauri/target/release/bundle/macos/*.tar.gz
+            mihomo/**/*.dmg
+          retention-days: 30
