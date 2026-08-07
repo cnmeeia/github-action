@@ -4,7 +4,9 @@ on:
   push:
     tags:
       - "v*"
+
   workflow_dispatch:
+
 
 permissions:
   contents: write
@@ -14,31 +16,58 @@ jobs:
 
   build-macos-arm64:
 
+    # Apple Silicon runner
     runs-on: macos-14
+
+
+    defaults:
+      run:
+        working-directory: mihomo
 
 
     steps:
 
+
+      # =========================
+      # Checkout 当前仓库
+      # =========================
       - name: Checkout
         uses: actions/checkout@v4
 
 
+
+      # =========================
+      # Clone mihomo 源码
+      # =========================
       - name: Clone mihomo
         run: |
-          git clone https://cnb.cool/cnmeeia/mihomo mihomo
-          cd mihomo
+          git clone https://cnb.cool/cnmeeia/mihomo .
           git checkout "${GITHUB_REF_NAME}"
 
+          echo "mihomo version:"
+          git rev-parse --short HEAD
 
+          ls -la
+
+
+
+      # =========================
+      # Rust
+      # =========================
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
 
-      - name: Rust target
+
+      - name: Install Rust target
         run: |
           rustup target add aarch64-apple-darwin
 
 
+
+      # =========================
+      # Node
+      # =========================
       - name: Install Node
         uses: actions/setup-node@v4
         with:
@@ -47,41 +76,100 @@ jobs:
           cache-dependency-path: mihomo/package-lock.json
 
 
-      - name: Install dependencies
-        working-directory: mihomo
-        run: npm ci
 
-      - name: Install tools
+      # =========================
+      # Node dependencies
+      # =========================
+      - name: Install dependencies
+        run: |
+          npm ci
+
+
+
+      # =========================
+      # macOS tools
+      # =========================
+      - name: Install build tools
         run: |
           brew install create-dmg
 
 
+
+      # =========================
+      # Build helper
+      # =========================
       - name: Build Helper Tool
         run: |
+
           bash scripts/build-helper.sh src-tauri/resources
+
 
           ls -lh \
           src-tauri/resources/mihomo-helper \
           src-tauri/resources/mihomo-helperctl
 
+
+          # 删除临时 swift helper
           rm -f \
           src-tauri/resources/mihomo-helper \
           src-tauri/resources/mihomo-helperctl
 
 
+
+      # =========================
+      # 下载 mihomo 内核
+      # =========================
       - name: Fetch mihomo kernel
         run: |
+
           bash scripts/fetch-kernel.sh
 
 
-      - name: Build Tauri
+
+      # =========================
+      # Build Tauri
+      # =========================
+      - name: Build Tauri App
         run: |
+
           npm run app:build
 
 
-      - name: Release
+
+      # =========================
+      # 查看产物
+      # =========================
+      - name: List build output
+        run: |
+
+          find src-tauri/target/release/bundle -type f
+
+
+
+      # =========================
+      # 上传 Artifact
+      # =========================
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+
+          name: mihomo-macos-arm64
+
+          path: |
+            mihomo/src-tauri/target/release/bundle/macos/*.app
+            mihomo/src-tauri/target/release/bundle/dmg/*.dmg
+            mihomo/src-tauri/target/release/bundle/macos/*.tar.gz
+
+
+
+      # =========================
+      # 发布 Release
+      # =========================
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
+
           files: |
-            src-tauri/target/release/bundle/dmg/*.dmg
-            src-tauri/target/release/bundle/macos/*.tar.gz
+            mihomo/src-tauri/target/release/bundle/dmg/*.dmg
+            mihomo/src-tauri/target/release/bundle/macos/*.tar.gz
