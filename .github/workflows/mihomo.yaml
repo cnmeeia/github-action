@@ -16,44 +16,40 @@ jobs:
 
   build-macos-arm64:
 
-    # Apple Silicon runner
     runs-on: macos-14
-
-
-    defaults:
-      run:
-        working-directory: mihomo
 
 
     steps:
 
 
-      # =========================
-      # Checkout 当前仓库
-      # =========================
+      # =====================
+      # Checkout
+      # =====================
       - name: Checkout
         uses: actions/checkout@v4
 
 
 
-      # =========================
-      # Clone mihomo 源码
-      # =========================
+      # =====================
+      # Clone mihomo
+      # =====================
       - name: Clone mihomo
         run: |
-          git clone https://cnb.cool/cnmeeia/mihomo .
+          git clone https://cnb.cool/cnmeeia/mihomo mihomo
+
+          cd mihomo
+
           git checkout "${GITHUB_REF_NAME}"
 
-          echo "mihomo version:"
           git rev-parse --short HEAD
 
           ls -la
 
 
 
-      # =========================
+      # =====================
       # Rust
-      # =========================
+      # =====================
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
@@ -65,9 +61,9 @@ jobs:
 
 
 
-      # =========================
+      # =====================
       # Node
-      # =========================
+      # =====================
       - name: Install Node
         uses: actions/setup-node@v4
         with:
@@ -77,28 +73,30 @@ jobs:
 
 
 
-      # =========================
-      # Node dependencies
-      # =========================
+      # =====================
+      # npm
+      # =====================
       - name: Install dependencies
+        working-directory: mihomo
         run: |
           npm ci
 
 
 
-      # =========================
-      # macOS tools
-      # =========================
-      - name: Install build tools
+      # =====================
+      # tools
+      # =====================
+      - name: Install tools
         run: |
           brew install create-dmg
 
 
 
-      # =========================
-      # Build helper
-      # =========================
+      # =====================
+      # helper
+      # =====================
       - name: Build Helper Tool
+        working-directory: mihomo
         run: |
 
           bash scripts/build-helper.sh src-tauri/resources
@@ -109,46 +107,48 @@ jobs:
           src-tauri/resources/mihomo-helperctl
 
 
-          # 删除临时 swift helper
           rm -f \
           src-tauri/resources/mihomo-helper \
           src-tauri/resources/mihomo-helperctl
 
 
 
-      # =========================
-      # 下载 mihomo 内核
-      # =========================
+      # =====================
+      # kernel
+      # =====================
       - name: Fetch mihomo kernel
+        working-directory: mihomo
         run: |
 
           bash scripts/fetch-kernel.sh
 
 
 
-      # =========================
-      # Build Tauri
-      # =========================
-      - name: Build Tauri App
+      # =====================
+      # Tauri
+      # =====================
+      - name: Build Tauri
+        working-directory: mihomo
         run: |
 
           npm run app:build
 
 
 
-      # =========================
-      # 查看产物
-      # =========================
-      - name: List build output
+      # =====================
+      # output
+      # =====================
+      - name: List output
+        working-directory: mihomo
         run: |
 
           find src-tauri/target/release/bundle -type f
 
 
 
-      # =========================
-      # 上传 Artifact
-      # =========================
+      # =====================
+      # artifact
+      # =====================
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
@@ -162,10 +162,10 @@ jobs:
 
 
 
-      # =========================
-      # 发布 Release
-      # =========================
-      - name: Create Release
+      # =====================
+      # release
+      # =====================
+      - name: Release
         if: startsWith(github.ref, 'refs/tags/')
         uses: softprops/action-gh-release@v2
         with:
