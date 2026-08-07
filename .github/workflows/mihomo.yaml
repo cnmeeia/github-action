@@ -36,6 +36,7 @@ jobs:
       # =====================
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
+        # 注: macos-14 是原生 ARM64 机器，默认 target 即为 aarch64-apple-darwin
 
       - name: Rust Cache
         uses: Swatinem/rust-cache@v2
@@ -65,13 +66,7 @@ jobs:
       - name: Build Helper Tool
         working-directory: mihomo
         run: |
-          # 动态热修复 1：将不可变常量 let 替换为可变变量 var，修复指针报错
-          sed -i '' 's/let socketAddr = sockaddr_un/var socketAddr = sockaddr_un/g' xcode/MihomoHelper/MihomoHelper.swift
-          
-          # 动态热修复 2：注释掉不存在的 terminateSignal 属性，修复不存在的成员报错
-          sed -i '' 's/process.terminateSignal = SIGUSR1/\/\/ process.terminateSignal = SIGUSR1/g' xcode/MihomoHelper/MihomoHelper.swift
-          
-          # 修复完成后，执行原本的编译脚本
+          # 源码已修复，直接执行编译脚本即可
           bash scripts/build-helper.sh src-tauri/resources
           
           # 列出产物确认编译成功
