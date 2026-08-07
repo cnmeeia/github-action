@@ -30,7 +30,8 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 22
-          cache: npm
+
+
 
 
       - name: Setup Rust
@@ -39,16 +40,18 @@ jobs:
           targets: aarch64-apple-darwin
 
 
-      - name: Setup Xcode
+      - name: Check Environment
         run: |
-          sudo xcode-select -switch /Applications/Xcode.app
+          node -v
+          npm -v
+          rustc --version
           xcodebuild -version
 
 
       - name: Install dependencies
         run: |
           cd mihomo
-          npm install
+          npm ci
 
 
       - name: Build DMG
@@ -66,6 +69,5 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: mihomo-macos-arm64
-          path: |
-            mihomo/**/*.dmg
+          path: mihomo/**/*.dmg
           retention-days: 30
