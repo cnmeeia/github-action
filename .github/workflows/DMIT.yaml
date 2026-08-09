@@ -1,0 +1,33 @@
+name: DMIT Tokyo Scan
+
+on:
+  workflow_dispatch:
+
+jobs:
+
+  scan:
+
+    runs-on: ubuntu-latest
+
+    steps:
+
+    - uses: actions/checkout@v4
+
+
+    - name: Install
+      run: |
+        sudo apt update
+        sudo apt install -y masscan
+
+
+    - name: Scan
+      run: |
+        chmod +x dmit-masscan.sh
+        sudo ./dmit-masscan.sh
+
+
+    - name: Upload
+      uses: actions/upload-artifact@v4
+      with:
+        name: dmit-result
+        path: dmit-result/
