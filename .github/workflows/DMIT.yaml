@@ -22,8 +22,8 @@ jobs:
 
     - name: Scan
       run: |
-        chmod +x dmit-masscan.sh
-        sudo ./dmit-masscan.sh
+        chmod +x dmit-masscan-asn.sh
+        sudo ./dmit-masscan-asn.sh
 
 
     - name: Upload
