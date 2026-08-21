@@ -1,0 +1,39 @@
+name: Build & Deploy ClipBoard
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Clone CNB repository
+        run: |
+          git clone https://cnb.cool/cnmeeia/ClipBoard.git ClipBoard
+
+      - name: Enter ClipBoard
+        working-directory: ClipBoard
+        run: |
+          pwd
+          ls -la
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: Install dependencies
+        working-directory: ClipBoard
+        run: npm i
+
+      - name: Build
+        working-directory: ClipBoard
+        run: npm run build
+
+      - name: Deploy
+        working-directory: ClipBoard
+        run: npm run deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
