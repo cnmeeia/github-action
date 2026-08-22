@@ -4,11 +4,7 @@ on:
   push:
     branches:
       - main       # 当 main 分支有 git push 时触发
-  pull_request:
-    branches:
-      - main       # 当有向 main 分支提交 PR 时触发
-
-
+  
 permissions:
   contents: read
 
