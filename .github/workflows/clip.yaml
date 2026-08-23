@@ -1,9 +1,11 @@
-name: Deploy ClipBoard
+name: Clip
 
 on:
   push:
     branches:
-      - main       # 当 main 分支有 git push 时触发
+      - main
+
+  workflow_dispatch:
   
 permissions:
   contents: read
