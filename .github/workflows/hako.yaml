@@ -5,18 +5,16 @@ on:
     branches:
       - main
       - master
-
   pull_request:
     branches:
       - main
       - master
-
   workflow_dispatch:
     inputs:
-      mihomo_ref:
-        description: "Mihomo branch / tag"
+      mihomo_version:
+        description: "Mihomo version tag (e.g. v1.19.30). Leave empty for latest."
         required: false
-        default: "main"
+        default: ""
       configuration:
         description: "Xcode build configuration"
         required: false
@@ -30,43 +28,21 @@ permissions:
   contents: read
 
 env:
-  # ------------------------------------------------------------
-  # Project
-  # ------------------------------------------------------------
   PROJECT: HakoClient.xcodeproj
   SCHEME: HakoClient
-
-  # ------------------------------------------------------------
-  # Build
-  # ------------------------------------------------------------
   CONFIGURATION: ${{ inputs.configuration || 'Release' }}
-
-  # ------------------------------------------------------------
-  # Mihomo
-  # ------------------------------------------------------------
-  MIHOMO_REPOSITORY: https://cnb.cool/cnmeeia/mihomo.git
-  MIHOMO_REF: ${{ inputs.mihomo_ref || 'main' }}
-
-  MIHOMO_SOURCE: .build/mihomo
   CORE_DIR: Core/mihomo
-
-  # ------------------------------------------------------------
-  # Output
-  # ------------------------------------------------------------
   BUILD_DIR: build
   DIST_DIR: dist
 
 jobs:
-  # ============================================================
-  # 1. Build Mihomo arm64
-  # ============================================================
-  build-mihomo:
-    name: Build Mihomo arm64
+  build-hakoclient:
+    name: Build Hako Client (arm64)
     runs-on: macos-latest
 
     steps:
       # --------------------------------------------------------
-      # Checkout Hako Client
+      # Checkout
       # --------------------------------------------------------
       - name: Checkout Hako Client
         uses: actions/checkout@v4
@@ -78,268 +54,77 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p \
-            "${MIHOMO_SOURCE}" \
-            "${CORE_DIR}/arm64" \
-            "${DIST_DIR}"
+          mkdir -p "${CORE_DIR}/arm64" "${DIST_DIR}" "${BUILD_DIR}"
 
       # --------------------------------------------------------
-      # Clone Mihomo from CNB
+      # Download Mihomo binary (darwin-arm64)
       # --------------------------------------------------------
-            # --------------------------------------------------------
-      # Clone Mihomo from CNB
-      # --------------------------------------------------------
-      - name: Clone Mihomo from CNB
+      - name: Download Mihomo darwin-arm64
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          echo "========================================"
-          echo "Clone Mihomo"
-          echo "========================================"
-          echo "Repository: ${MIHOMO_REPOSITORY}"
-          echo "Ref: ${MIHOMO_REF}"
 
-          # 清理可能存在的目录，避免 git clone 到非空目录
-          rm -rf "${MIHOMO_SOURCE}"
-          mkdir -p "$(dirname "${MIHOMO_SOURCE}")"
+          echo "========================================"
+          echo "Download Mihomo binary"
+          echo "========================================"
 
-          git clone \
-            --depth=1 \
-            --branch "${MIHOMO_REF}" \
-            "${MIHOMO_REPOSITORY}" \
-            "${MIHOMO_SOURCE}"
+          # 确定版本
+          if [ -n "${{ inputs.mihomo_version }}" ]; then
+            TAG="${{ inputs.mihomo_version }}"
+            echo "Using specified version: ${TAG}"
+          else
+            echo "Fetching latest release tag..."
+            TAG=$(gh api repos/MetaCubeX/mihomo/releases/latest --jq '.tag_name')
+            echo "Latest tag: ${TAG}"
+          fi
 
-          cd "${MIHOMO_SOURCE}"
-          echo
-          echo "Mihomo commit:"
-          git rev-parse HEAD
-          echo
-          echo "Mihomo source:"
-          git remote -v
-          echo
-          echo "Checking go.mod..."
-          test -f go.mod
-          ls -la go.mod
+          # 查找 darwin-arm64 资源
+          # 优先匹配 mihomo-darwin-arm64-*.gz（排除 compatible / go 特殊标签时可再调整）
+          ASSET_URL=$(gh api "repos/MetaCubeX/mihomo/releases/tags/${TAG}" \
+            --jq '.assets[] | select(.name | test("mihomo-darwin-arm64.*\\.gz$")) | .browser_download_url' \
+            | head -n 1)
 
-      # --------------------------------------------------------
-      # Setup Go（使用固定版本，更稳定）
-      # --------------------------------------------------------
-      - name: Setup Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.23'          # 或 '1.22' / '1.24'，按 Mihomo 实际要求调整
-          cache: true
-          cache-dependency-path: ${{ env.MIHOMO_SOURCE }}/go.sum
+          if [ -z "${ASSET_URL}" ]; then
+            echo "ERROR: No mihomo-darwin-arm64 *.gz asset found for tag ${TAG}"
+            echo "Available assets:"
+            gh api "repos/MetaCubeX/mihomo/releases/tags/${TAG}" --jq '.assets[].name'
+            exit 1
+          fi
 
-      # --------------------------------------------------------
-      # Environment
-      # --------------------------------------------------------
-      - name: Show build environment
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "========================================"
-          echo "System"
-          echo "========================================"
-          sw_vers
-          echo
-          echo "========================================"
-          echo "Architecture"
-          echo "========================================"
-          uname -m
-          echo
-          echo "========================================"
-          echo "Xcode"
-          echo "========================================"
-          xcodebuild -version
-          echo
-          echo "========================================"
-          echo "Go"
-          echo "========================================"
-          go version
+          echo "Downloading: ${ASSET_URL}"
+          curl -L --fail --retry 3 -o mihomo.gz "${ASSET_URL}"
 
-      # --------------------------------------------------------
-      # Download Go dependencies
-      # --------------------------------------------------------
-      - name: Download Mihomo dependencies
-        working-directory: ${{ env.MIHOMO_SOURCE }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          go mod download
-
-      # --------------------------------------------------------
-      # Build Mihomo arm64
-      # --------------------------------------------------------
-      - name: Build Mihomo darwin arm64
-        working-directory: ${{ env.MIHOMO_SOURCE }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "========================================"
-          echo "Building Mihomo"
-          echo "GOOS   = darwin"
-          echo "GOARCH = arm64"
-          echo "========================================"
-          BUILD_TIME="$(date -u '+%Y-%m-%dT%H:%M:%SZ')"
-          MIHOMO_VERSION="$(
-            git describe \
-              --tags \
-              --always \
-              --dirty 2>/dev/null \
-              || git rev-parse --short HEAD
-          )"
-          echo "Mihomo version: ${MIHOMO_VERSION}"
-          echo "Build time: ${BUILD_TIME}"
-          CGO_ENABLED=0 \
-          GOOS=darwin \
-          GOARCH=arm64 \
-          go build \
-            -tags with_gvisor \
-            -trimpath \
-            -ldflags "\
-              -s -w \
-              -X github.com/metacubex/mihomo/constant.Version=${MIHOMO_VERSION} \
-              -X github.com/metacubex/mihomo/constant.BuildTime=${BUILD_TIME} \
-            " \
-            -o "../../${CORE_DIR}/arm64/mihomo"
-
-      # --------------------------------------------------------
-      # Make executable
-      # --------------------------------------------------------
-      - name: Prepare Mihomo binary
-        shell: bash
-        run: |
-          set -euo pipefail
+          echo "Extracting..."
+          gunzip -c mihomo.gz > "${CORE_DIR}/arm64/mihomo"
           chmod +x "${CORE_DIR}/arm64/mihomo"
+          rm -f mihomo.gz
 
-      # --------------------------------------------------------
-      # Verify binary
-      # --------------------------------------------------------
-      - name: Verify Mihomo arm64
-        shell: bash
-        run: |
-          set -euo pipefail
-          BINARY="${CORE_DIR}/arm64/mihomo"
-          echo "========================================"
-          echo "File"
-          echo "========================================"
-          file "${BINARY}"
           echo
-          echo "========================================"
-          echo "Architecture"
-          echo "========================================"
-          file "${BINARY}" | grep -E "arm64|ARM64"
-          echo
-          echo "========================================"
-          echo "Mihomo version"
-          echo "========================================"
-          "${BINARY}" -v || true
-          echo
-          echo "========================================"
-          echo "SHA256"
-          echo "========================================"
-          shasum -a 256 "${BINARY}"
+          echo "Installed binary:"
+          ls -lah "${CORE_DIR}/arm64/mihomo"
+          file "${CORE_DIR}/arm64/mihomo"
+          file "${CORE_DIR}/arm64/mihomo" | grep -E "arm64|ARM64"
 
-      # --------------------------------------------------------
-      # Create metadata
-      # --------------------------------------------------------
-      - name: Create Mihomo metadata
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p "${DIST_DIR}"
-          MIHOMO_COMMIT="$(
-            git -C "${MIHOMO_SOURCE}" rev-parse HEAD
-          )"
-          MIHOMO_VERSION="$(
-            "${CORE_DIR}/arm64/mihomo" -v 2>&1 \
-              | head -n 1 \
-              || true
-          )"
-          SHA256="$(
-            shasum -a 256 "${CORE_DIR}/arm64/mihomo" \
-              | awk '{print $1}'
-          )"
+          echo
+          echo "Mihomo version:"
+          "${CORE_DIR}/arm64/mihomo" -v || true
+
+          # 写入元数据
+          SHA256=$(shasum -a 256 "${CORE_DIR}/arm64/mihomo" | awk '{print $1}')
           cat > "${DIST_DIR}/mihomo-metadata.txt" <<EOF
           Hako Client Mihomo Core
 
-          Repository:
-          ${MIHOMO_REPOSITORY}
-
-          Ref:
-          ${MIHOMO_REF}
-
-          Commit:
-          ${MIHOMO_COMMIT}
-
-          Architecture:
-          darwin/arm64
-
-          Version:
-          ${MIHOMO_VERSION}
-
-          SHA256:
-          ${SHA256}
-
-          Build Time:
-          $(date -u '+%Y-%m-%dT%H:%M:%SZ')
+          Source: MetaCubeX/mihomo (official release)
+          Tag: ${TAG}
+          Asset: ${ASSET_URL}
+          Architecture: darwin/arm64
+          SHA256: ${SHA256}
+          Build Time: $(date -u '+%Y-%m-%dT%H:%M:%SZ')
           EOF
+
           cat "${DIST_DIR}/mihomo-metadata.txt"
-
-      # --------------------------------------------------------
-      # Upload Mihomo artifact
-      # --------------------------------------------------------
-      - name: Upload Mihomo arm64 artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: hako-mihomo-darwin-arm64
-          path: |
-            Core/mihomo/arm64/mihomo
-            dist/mihomo-metadata.txt
-          if-no-files-found: error
-          retention-days: 14
-
-  # ============================================================
-  # 2. Build Hako Client
-  # ============================================================
-  build-hakoclient:
-    name: Build Hako Client
-    needs:
-      - build-mihomo
-    runs-on: macos-latest
-
-    steps:
-      # --------------------------------------------------------
-      # Checkout Hako Client
-      # --------------------------------------------------------
-      - name: Checkout Hako Client
-        uses: actions/checkout@v4
-
-      # --------------------------------------------------------
-      # Download Mihomo
-      # --------------------------------------------------------
-      - name: Download Mihomo arm64
-        uses: actions/download-artifact@v4
-        with:
-          name: hako-mihomo-darwin-arm64
-          path: .artifact/mihomo
-
-      # --------------------------------------------------------
-      # Install Mihomo into project
-      # --------------------------------------------------------
-      - name: Install Mihomo core
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p "${CORE_DIR}/arm64"
-          cp \
-            ".artifact/mihomo/mihomo" \
-            "${CORE_DIR}/arm64/mihomo"
-          chmod +x \
-            "${CORE_DIR}/arm64/mihomo"
-          echo "Installed:"
-          ls -lah "${CORE_DIR}/arm64/"
 
       # --------------------------------------------------------
       # Verify project
@@ -348,21 +133,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "========================================"
-          echo "Project"
-          echo "========================================"
           test -f "${PROJECT}"
-          echo
-          echo "========================================"
-          echo "Mihomo"
-          echo "========================================"
           test -x "${CORE_DIR}/arm64/mihomo"
-          file "${CORE_DIR}/arm64/mihomo"
-          file "${CORE_DIR}/arm64/mihomo" \
-            | grep -E "arm64|ARM64"
+          echo "Project and Mihomo binary OK"
 
       # --------------------------------------------------------
-      # Xcode information
+      # Xcode info
       # --------------------------------------------------------
       - name: Xcode information
         shell: bash
@@ -370,10 +146,7 @@ jobs:
           set -euo pipefail
           xcodebuild -version
           echo
-          echo "Available schemes:"
-          xcodebuild \
-            -project "${PROJECT}" \
-            -list
+          xcodebuild -project "${PROJECT}" -list
 
       # --------------------------------------------------------
       # Clean
@@ -384,7 +157,6 @@ jobs:
           set -euo pipefail
           rm -rf "${BUILD_DIR}"
           mkdir -p "${BUILD_DIR}"
-          mkdir -p "${DIST_DIR}"
           xcodebuild \
             -project "${PROJECT}" \
             -scheme "${SCHEME}" \
@@ -394,8 +166,7 @@ jobs:
             clean
 
       # --------------------------------------------------------
-      # Build
-      # No Apple Developer Account required.
+      # Build (no code signing required)
       # --------------------------------------------------------
       - name: Build Hako Client
         shell: bash
@@ -437,226 +208,88 @@ jobs:
             test
 
       # --------------------------------------------------------
-      # Locate app
-      # --------------------------------------------------------
-      - name: Locate HakoClient.app
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "Searching for HakoClient.app..."
-          find "${BUILD_DIR}" \
-            -type d \
-            -name "HakoClient.app" \
-            -print
-
-      # --------------------------------------------------------
-      # Validate application
+      # Validate app + Mihomo bundling
       # --------------------------------------------------------
       - name: Validate HakoClient.app
         shell: bash
         run: |
           set -euo pipefail
-          APP="$(
-            find "${BUILD_DIR}/DerivedData/Build/Products" \
-              -type d \
-              -name "HakoClient.app" \
-              | head -n 1
-          )"
+
+          APP=$(find "${BUILD_DIR}/DerivedData/Build/Products" -type d -name "HakoClient.app" | head -n 1)
           if [ -z "${APP}" ]; then
             echo "ERROR: HakoClient.app not found"
+            find "${BUILD_DIR}" -name "*.app" -print || true
             exit 1
           fi
-          echo "App:"
-          echo "${APP}"
-          echo
-          echo "========================================"
-          echo "Application"
-          echo "========================================"
+
+          echo "App: ${APP}"
           ls -lah "${APP}"
-          echo
-          echo "========================================"
-          echo "Executable"
-          echo "========================================"
           file "${APP}/Contents/MacOS/HakoClient"
-          echo
-          echo "========================================"
-          echo "Mihomo"
-          echo "========================================"
+
+          # 检查 Mihomo 是否被正确打包进 Resources
           MIHOMO="${APP}/Contents/Resources/Core/mihomo/arm64/mihomo"
           if [ ! -f "${MIHOMO}" ]; then
             echo "ERROR: Mihomo was not bundled into the application"
-            echo
-            echo "Searching application bundle:"
-            find "${APP}/Contents" \
-              -type f \
-              -name "mihomo" \
-              -print
+            echo "Searching for mihomo inside the app:"
+            find "${APP}/Contents" -type f -name "mihomo" -print || true
             exit 1
           fi
+
           file "${MIHOMO}"
-          file "${MIHOMO}" \
-            | grep -E "arm64|ARM64"
+          file "${MIHOMO}" | grep -E "arm64|ARM64"
           test -x "${MIHOMO}"
-          echo
           echo "Mihomo successfully bundled."
 
       # --------------------------------------------------------
-      # Inspect bundle
-      # --------------------------------------------------------
-      - name: Inspect application bundle
-        shell: bash
-        run: |
-          set -euo pipefail
-          APP="$(
-            find "${BUILD_DIR}/DerivedData/Build/Products" \
-              -type d \
-              -name "HakoClient.app" \
-              | head -n 1
-          )"
-          echo "Bundle structure:"
-          find "${APP}/Contents" \
-            -maxdepth 5 \
-            -print
-
-      # --------------------------------------------------------
-      # Code signing inspection
-      # This is informational only.
-      # --------------------------------------------------------
-      - name: Inspect code signature
-        shell: bash
-        run: |
-          set +e
-          APP="$(
-            find "${BUILD_DIR}/DerivedData/Build/Products" \
-              -type d \
-              -name "HakoClient.app" \
-              | head -n 1
-          )"
-          codesign \
-            --display \
-            --verbose=4 \
-            "${APP}"
-          true
-
-      # --------------------------------------------------------
-      # Package application
+      # Package
       # --------------------------------------------------------
       - name: Package Hako Client
         shell: bash
         run: |
           set -euo pipefail
-          APP="$(
-            find "${BUILD_DIR}/DerivedData/Build/Products" \
-              -type d \
-              -name "HakoClient.app" \
-              | head -n 1
-          )"
-          if [ -z "${APP}" ]; then
-            echo "ERROR: HakoClient.app not found"
-            exit 1
-          fi
-          VERSION="$(
-            /usr/libexec/PlistBuddy \
-              -c "Print :CFBundleShortVersionString" \
-              "${APP}/Contents/Info.plist" \
-              2>/dev/null \
-              || echo "0.1"
-          )"
-          ARCH="arm64"
-          ZIP_NAME="HakoClient-v${VERSION}-macOS-${ARCH}.zip"
-          ditto \
-            -c \
-            -k \
-            --sequesterRsrc \
-            --keepParent \
-            "${APP}" \
-            "${DIST_DIR}/${ZIP_NAME}"
-          echo "Created:"
+
+          APP=$(find "${BUILD_DIR}/DerivedData/Build/Products" -type d -name "HakoClient.app" | head -n 1)
+          VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "${APP}/Contents/Info.plist" 2>/dev/null || echo "0.1")
+          ZIP_NAME="HakoClient-v${VERSION}-macOS-arm64.zip"
+
+          ditto -c -k --sequesterRsrc --keepParent "${APP}" "${DIST_DIR}/${ZIP_NAME}"
+          echo "Created: ${DIST_DIR}/${ZIP_NAME}"
           ls -lh "${DIST_DIR}/${ZIP_NAME}"
 
       # --------------------------------------------------------
-      # SHA256
+      # SHA256 + metadata
       # --------------------------------------------------------
-      - name: Generate SHA256
+      - name: Generate checksums and metadata
         shell: bash
         run: |
           set -euo pipefail
+
           cd "${DIST_DIR}"
-          shasum -a 256 \
-            *.zip \
-            > SHA256SUMS
+          shasum -a 256 *.zip > SHA256SUMS
           cat SHA256SUMS
 
-      # --------------------------------------------------------
-      # Build metadata
-      # --------------------------------------------------------
-      - name: Generate build metadata
-        shell: bash
-        run: |
-          set -euo pipefail
-          APP="$(
-            find "${BUILD_DIR}/DerivedData/Build/Products" \
-              -type d \
-              -name "HakoClient.app" \
-              | head -n 1
-          )"
-          APP_VERSION="$(
-            /usr/libexec/PlistBuddy \
-              -c "Print :CFBundleShortVersionString" \
-              "${APP}/Contents/Info.plist" \
-              2>/dev/null \
-              || echo "unknown"
-          )"
-          APP_BUILD="$(
-            /usr/libexec/PlistBuddy \
-              -c "Print :CFBundleVersion" \
-              "${APP}/Contents/Info.plist" \
-              2>/dev/null \
-              || echo "unknown"
-          )"
-          cat > "${DIST_DIR}/build-metadata.txt" <<EOF
+          APP=$(find "../${BUILD_DIR}/DerivedData/Build/Products" -type d -name "HakoClient.app" | head -n 1)
+          APP_VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "${APP}/Contents/Info.plist" 2>/dev/null || echo "unknown")
+          APP_BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "${APP}/Contents/Info.plist" 2>/dev/null || echo "unknown")
+
+          cat > build-metadata.txt <<EOF
           Hako Client Build
 
-          Application:
-          HakoClient
-
-          Version:
-          ${APP_VERSION}
-
-          Build:
-          ${APP_BUILD}
-
-          Configuration:
-          ${CONFIGURATION}
-
-          Architecture:
-          arm64
-
-          Platform:
-          macOS
-
-          Mihomo:
-          darwin/arm64
-
-          Mihomo Source:
-          ${MIHOMO_REPOSITORY}
-
-          Mihomo Ref:
-          ${MIHOMO_REF}
-
-          Build Time:
-          $(date -u '+%Y-%m-%dT%H:%M:%SZ')
-
-          Signing:
-          Unsigned
-
-          Apple Developer Program:
-          Not required for v0.1 build
+          Application: HakoClient
+          Version: ${APP_VERSION}
+          Build: ${APP_BUILD}
+          Configuration: ${CONFIGURATION}
+          Architecture: arm64
+          Platform: macOS
+          Mihomo: official prebuilt darwin-arm64
+          Signing: Unsigned
+          Build Time: $(date -u '+%Y-%m-%dT%H:%M:%SZ')
           EOF
-          cat "${DIST_DIR}/build-metadata.txt"
+
+          cat build-metadata.txt
 
       # --------------------------------------------------------
-      # Upload final artifact
+      # Upload artifact
       # --------------------------------------------------------
       - name: Upload Hako Client artifact
         uses: actions/upload-artifact@v4
@@ -671,7 +304,7 @@ jobs:
           retention-days: 30
 
       # --------------------------------------------------------
-      # Upload diagnostics if build fails
+      # Diagnostics on failure
       # --------------------------------------------------------
       - name: Upload build diagnostics
         if: failure()
