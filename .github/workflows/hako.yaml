@@ -1,51 +1,20 @@
-name: Hako Client Build
-
-on:
-  push:
-    branches:
-      - main
-      - master
-  pull_request:
-    branches:
-      - main
-      - master
-  workflow_dispatch:
-    inputs:
-      mihomo_version:
-        description: "Mihomo version tag (e.g. v1.19.30). Leave empty for latest."
-        required: false
-        default: ""
-      configuration:
-        description: "Xcode build configuration"
-        required: false
-        type: choice
-        options:
-          - Debug
-          - Release
-        default: Release
-
-permissions:
-  contents: read
-
-env:
-  PROJECT: HakoClient.xcodeproj
-  SCHEME: HakoClient
-  CONFIGURATION: ${{ inputs.configuration || 'Release' }}
-  CORE_DIR: Core/mihomo
-  BUILD_DIR: build
-  DIST_DIR: dist
-
 jobs:
   build-hakoclient:
     name: Build Hako Client (arm64)
     runs-on: macos-latest
 
+    defaults:
+      run:
+        working-directory: HakoClient   # 所有 run 步骤默认进入这个目录
+
     steps:
       # --------------------------------------------------------
-      # Checkout
+      # Checkout 正确分支
       # --------------------------------------------------------
       - name: Checkout Hako Client
         uses: actions/checkout@v4
+        with:
+          ref: auto/hako-macos-swift
 
       # --------------------------------------------------------
       # Prepare directories
@@ -55,9 +24,11 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p "${CORE_DIR}/arm64" "${DIST_DIR}" "${BUILD_DIR}"
+          ls -la
+          test -f "${PROJECT}"
 
       # --------------------------------------------------------
-      # Download Mihomo binary (darwin-arm64)
+      # Download Mihomo binary
       # --------------------------------------------------------
       - name: Download Mihomo darwin-arm64
         shell: bash
@@ -70,72 +41,58 @@ jobs:
           echo "Download Mihomo binary"
           echo "========================================"
 
-          # 确定版本
           if [ -n "${{ inputs.mihomo_version }}" ]; then
             TAG="${{ inputs.mihomo_version }}"
-            echo "Using specified version: ${TAG}"
           else
-            echo "Fetching latest release tag..."
             TAG=$(gh api repos/MetaCubeX/mihomo/releases/latest --jq '.tag_name')
-            echo "Latest tag: ${TAG}"
           fi
+          echo "Using tag: ${TAG}"
 
-          # 查找 darwin-arm64 资源
-          # 优先匹配 mihomo-darwin-arm64-*.gz（排除 compatible / go 特殊标签时可再调整）
           ASSET_URL=$(gh api "repos/MetaCubeX/mihomo/releases/tags/${TAG}" \
             --jq '.assets[] | select(.name | test("mihomo-darwin-arm64.*\\.gz$")) | .browser_download_url' \
             | head -n 1)
 
           if [ -z "${ASSET_URL}" ]; then
-            echo "ERROR: No mihomo-darwin-arm64 *.gz asset found for tag ${TAG}"
-            echo "Available assets:"
+            echo "ERROR: No mihomo-darwin-arm64 asset found"
             gh api "repos/MetaCubeX/mihomo/releases/tags/${TAG}" --jq '.assets[].name'
             exit 1
           fi
 
           echo "Downloading: ${ASSET_URL}"
           curl -L --fail --retry 3 -o mihomo.gz "${ASSET_URL}"
-
-          echo "Extracting..."
           gunzip -c mihomo.gz > "${CORE_DIR}/arm64/mihomo"
           chmod +x "${CORE_DIR}/arm64/mihomo"
           rm -f mihomo.gz
 
-          echo
-          echo "Installed binary:"
           ls -lah "${CORE_DIR}/arm64/mihomo"
           file "${CORE_DIR}/arm64/mihomo"
-          file "${CORE_DIR}/arm64/mihomo" | grep -E "arm64|ARM64"
-
-          echo
-          echo "Mihomo version:"
           "${CORE_DIR}/arm64/mihomo" -v || true
 
-          # 写入元数据
           SHA256=$(shasum -a 256 "${CORE_DIR}/arm64/mihomo" | awk '{print $1}')
           cat > "${DIST_DIR}/mihomo-metadata.txt" <<EOF
           Hako Client Mihomo Core
-
-          Source: MetaCubeX/mihomo (official release)
+          Source: MetaCubeX/mihomo
           Tag: ${TAG}
-          Asset: ${ASSET_URL}
           Architecture: darwin/arm64
           SHA256: ${SHA256}
           Build Time: $(date -u '+%Y-%m-%dT%H:%M:%SZ')
           EOF
 
-          cat "${DIST_DIR}/mihomo-metadata.txt"
-
       # --------------------------------------------------------
-      # Verify project
+      # Verify
       # --------------------------------------------------------
       - name: Verify project
         shell: bash
         run: |
           set -euo pipefail
+          echo "Current dir: $(pwd)"
+          ls -la
           test -f "${PROJECT}"
           test -x "${CORE_DIR}/arm64/mihomo"
           echo "Project and Mihomo binary OK"
+
+      # 后面的 Build / Test / Package 步骤保持不变
+      # 因为已经设置了 defaults.run.working-directory: HakoClientOK"
 
       # --------------------------------------------------------
       # Xcode info
