@@ -86,6 +86,9 @@ jobs:
       # --------------------------------------------------------
       # Clone Mihomo from CNB
       # --------------------------------------------------------
+            # --------------------------------------------------------
+      # Clone Mihomo from CNB
+      # --------------------------------------------------------
       - name: Clone Mihomo from CNB
         shell: bash
         run: |
@@ -93,15 +96,19 @@ jobs:
           echo "========================================"
           echo "Clone Mihomo"
           echo "========================================"
-          echo "Repository:"
-          echo "${MIHOMO_REPOSITORY}"
-          echo "Ref:"
-          echo "${MIHOMO_REF}"
+          echo "Repository: ${MIHOMO_REPOSITORY}"
+          echo "Ref: ${MIHOMO_REF}"
+
+          # 清理可能存在的目录，避免 git clone 到非空目录
+          rm -rf "${MIHOMO_SOURCE}"
+          mkdir -p "$(dirname "${MIHOMO_SOURCE}")"
+
           git clone \
             --depth=1 \
             --branch "${MIHOMO_REF}" \
             "${MIHOMO_REPOSITORY}" \
             "${MIHOMO_SOURCE}"
+
           cd "${MIHOMO_SOURCE}"
           echo
           echo "Mihomo commit:"
@@ -109,15 +116,20 @@ jobs:
           echo
           echo "Mihomo source:"
           git remote -v
+          echo
+          echo "Checking go.mod..."
+          test -f go.mod
+          ls -la go.mod
 
       # --------------------------------------------------------
-      # Setup Go
+      # Setup Go（使用固定版本，更稳定）
       # --------------------------------------------------------
       - name: Setup Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@v5
         with:
-          go-version-file: .build/mihomo/go.mod
+          go-version: '1.23'          # 或 '1.22' / '1.24'，按 Mihomo 实际要求调整
           cache: true
+          cache-dependency-path: ${{ env.MIHOMO_SOURCE }}/go.sum
 
       # --------------------------------------------------------
       # Environment
