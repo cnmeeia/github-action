@@ -1,5 +1,4 @@
 name: Hako Client Build
-
 on:
   push:
     branches:
@@ -25,10 +24,8 @@ on:
           - Debug
           - Release
         default: Release
-
 permissions:
   contents: read
-
 env:
   PROJECT: HakoClient.xcodeproj
   SCHEME: HakoClient
@@ -36,119 +33,163 @@ env:
   CORE_DIR: Core/mihomo
   BUILD_DIR: build
   DIST_DIR: dist
-
+  # Force Apple Silicon only
+  ARCHS: arm64
+  EXCLUDED_ARCHS: x86_64
 jobs:
   build-hakoclient:
-    name: Build Hako Client (arm64)
+    name: Build Hako Client (macOS arm64)
+    # GitHub-hosted Apple Silicon runner
     runs-on: macos-latest
-
     defaults:
       run:
         working-directory: HakoClient
-
     steps:
-      # --------------------------------------------------------
-      # Checkout 正确分支
-      # --------------------------------------------------------
+      # ==========================================================
+      # Checkout
+      # ==========================================================
       - name: Checkout Hako Client
         uses: actions/checkout@v4
         with:
           ref: auto/hako-macos-swift
-
-      # --------------------------------------------------------
+      # ==========================================================
+      # Runner information
+      # ==========================================================
+      - name: Verify ARM64 runner
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "========================================"
+          echo "Runner"
+          echo "========================================"
+          uname -a
+          uname -m
+          echo
+          echo "CPU architecture:"
+          arch
+          echo
+          echo "Xcode:"
+          xcodebuild -version
+          if [ "$(uname -m)" != "arm64" ]; then
+            echo "ERROR: GitHub runner is not arm64"
+            exit 1
+          fi
+          echo
+          echo "ARM64 runner confirmed."
+      # ==========================================================
       # Prepare directories
-      # --------------------------------------------------------
+      # ==========================================================
       - name: Prepare directories
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p "${CORE_DIR}/arm64" "${DIST_DIR}" "${BUILD_DIR}"
-          echo "Workspace contents:"
+          mkdir -p \
+            "${CORE_DIR}/arm64" \
+            "${DIST_DIR}" \
+            "${BUILD_DIR}"
+          echo "Workspace:"
+          pwd
           ls -la
           test -f "${PROJECT}"
-
-      # --------------------------------------------------------
-      # Download Mihomo binary (darwin-arm64)
-      # --------------------------------------------------------
+      # ==========================================================
+      # Download Mihomo darwin-arm64
+      # ==========================================================
       - name: Download Mihomo darwin-arm64
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-
           echo "========================================"
-          echo "Download Mihomo binary"
+          echo "Download Mihomo"
           echo "========================================"
-
           if [ -n "${{ inputs.mihomo_version }}" ]; then
             TAG="${{ inputs.mihomo_version }}"
-            echo "Using specified version: ${TAG}"
           else
-            echo "Fetching latest release tag..."
-            TAG=$(gh api repos/MetaCubeX/mihomo/releases/latest --jq '.tag_name')
-            echo "Latest tag: ${TAG}"
+            TAG="$(gh api \
+              repos/MetaCubeX/mihomo/releases/latest \
+              --jq '.tag_name')"
           fi
-
-          ASSET_URL=$(gh api "repos/MetaCubeX/mihomo/releases/tags/${TAG}" \
-            --jq '.assets[] | select(.name | test("mihomo-darwin-arm64.*\\.gz$")) | .browser_download_url' \
-            | head -n 1)
-
+          echo "Mihomo tag: ${TAG}"
+          ASSET_URL="$(
+            gh api \
+              "repos/MetaCubeX/mihomo/releases/tags/${TAG}" \
+              --jq '
+                .assets[]
+                | select(
+                    .name
+                    | test("mihomo-darwin-arm64.*\\.gz$")
+                  )
+                | .browser_download_url
+              ' \
+              | head -n 1
+          )"
           if [ -z "${ASSET_URL}" ]; then
-            echo "ERROR: No mihomo-darwin-arm64 *.gz asset found for tag ${TAG}"
-            echo "Available assets:"
-            gh api "repos/MetaCubeX/mihomo/releases/tags/${TAG}" --jq '.assets[].name'
+            echo "ERROR: mihomo darwin-arm64 asset not found"
+            gh api \
+              "repos/MetaCubeX/mihomo/releases/tags/${TAG}" \
+              --jq '.assets[].name'
             exit 1
           fi
-
-          echo "Downloading: ${ASSET_URL}"
-          curl -L --fail --retry 3 -o mihomo.gz "${ASSET_URL}"
-
+          echo "Asset:"
+          echo "${ASSET_URL}"
+          curl \
+            --fail \
+            --location \
+            --retry 3 \
+            --retry-delay 2 \
+            --output mihomo.gz \
+            "${ASSET_URL}"
           echo "Extracting..."
-          gunzip -c mihomo.gz > "${CORE_DIR}/arm64/mihomo"
+          gunzip -c \
+            mihomo.gz \
+            > "${CORE_DIR}/arm64/mihomo"
           chmod +x "${CORE_DIR}/arm64/mihomo"
           rm -f mihomo.gz
-
           echo
-          echo "Installed binary:"
+          echo "Mihomo binary:"
           ls -lah "${CORE_DIR}/arm64/mihomo"
+          echo
           file "${CORE_DIR}/arm64/mihomo"
-          file "${CORE_DIR}/arm64/mihomo" | grep -E "arm64|ARM64"
-
+          file "${CORE_DIR}/arm64/mihomo" \
+            | grep -E "arm64|ARM64"
           echo
           echo "Mihomo version:"
           "${CORE_DIR}/arm64/mihomo" -v || true
-
-          SHA256=$(shasum -a 256 "${CORE_DIR}/arm64/mihomo" | awk '{print $1}')
+          SHA256="$(
+            shasum -a 256 \
+              "${CORE_DIR}/arm64/mihomo" \
+              | awk '{print $1}'
+          )"
           cat > "${DIST_DIR}/mihomo-metadata.txt" <<EOF
-          Hako Client Mihomo Core
-
-          Source: MetaCubeX/mihomo (official release)
-          Tag: ${TAG}
-          Asset: ${ASSET_URL}
-          Architecture: darwin/arm64
-          SHA256: ${SHA256}
-          Build Time: $(date -u '+%Y-%m-%dT%H:%M:%SZ')
-          EOF
-
+Hako Client Mihomo Core
+Source: MetaCubeX/mihomo
+Tag: ${TAG}
+Asset: ${ASSET_URL}
+Architecture: darwin/arm64
+SHA256: ${SHA256}
+Build Time: $(date -u '+%Y-%m-%dT%H:%M:%SZ')
+EOF
           cat "${DIST_DIR}/mihomo-metadata.txt"
-
-      # --------------------------------------------------------
+      # ==========================================================
       # Verify project
-      # --------------------------------------------------------
+      # ==========================================================
       - name: Verify project
         shell: bash
         run: |
           set -euo pipefail
-          echo "Current directory: $(pwd)"
-          ls -la
           test -f "${PROJECT}"
           test -x "${CORE_DIR}/arm64/mihomo"
-          echo "Project and Mihomo binary OK"
-
-      # --------------------------------------------------------
+          echo "Project:"
+          ls -lah "${PROJECT}"
+          echo
+          echo "Mihomo:"
+          ls -lah "${CORE_DIR}/arm64/mihomo"
+          echo
+          echo "Verification OK."
+      # ==========================================================
       # Xcode information
-      # --------------------------------------------------------
+      # ==========================================================
       - name: Xcode information
         shell: bash
         run: |
@@ -156,11 +197,12 @@ jobs:
           xcodebuild -version
           echo
           echo "Available schemes:"
-          xcodebuild -project "${PROJECT}" -list
-
-      # --------------------------------------------------------
+          xcodebuild \
+            -project "${PROJECT}" \
+            -list
+      # ==========================================================
       # Clean
-      # --------------------------------------------------------
+      # ==========================================================
       - name: Clean Xcode build
         shell: bash
         run: |
@@ -173,12 +215,15 @@ jobs:
             -configuration "${CONFIGURATION}" \
             -sdk macosx \
             -derivedDataPath "${BUILD_DIR}/DerivedData" \
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=YES \
+            EXCLUDED_ARCHS=x86_64 \
             clean
-
-      # --------------------------------------------------------
-      # Build (no Apple Developer account required)
-      # --------------------------------------------------------
-      - name: Build Hako Client
+      # ==========================================================
+      # Build
+      # No Apple Developer Account required
+      # ==========================================================
+      - name: Build Hako Client arm64
         shell: bash
         run: |
           set -euo pipefail
@@ -189,16 +234,17 @@ jobs:
             -sdk macosx \
             -destination 'platform=macOS' \
             -derivedDataPath "${BUILD_DIR}/DerivedData" \
-            ONLY_ACTIVE_ARCH=NO \
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=YES \
+            EXCLUDED_ARCHS=x86_64 \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             DEVELOPMENT_TEAM="" \
             build
-
-      # --------------------------------------------------------
-      # Test
-      # --------------------------------------------------------
+      # ==========================================================
+      # Tests
+      # ==========================================================
       - name: Run tests
         shell: bash
         run: |
@@ -210,153 +256,253 @@ jobs:
             -sdk macosx \
             -destination 'platform=macOS' \
             -derivedDataPath "${BUILD_DIR}/TestDerivedData" \
-            ONLY_ACTIVE_ARCH=NO \
+            ARCHS=arm64 \
+            ONLY_ACTIVE_ARCH=YES \
+            EXCLUDED_ARCHS=x86_64 \
             CODE_SIGNING_ALLOWED=NO \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGN_IDENTITY="" \
             DEVELOPMENT_TEAM="" \
             test
-
-      # --------------------------------------------------------
+      # ==========================================================
       # Locate app
-      # --------------------------------------------------------
+      # ==========================================================
       - name: Locate HakoClient.app
         shell: bash
         run: |
           set -euo pipefail
-          echo "Searching for HakoClient.app..."
-          find "${BUILD_DIR}" -type d -name "HakoClient.app" -print
-
-      # --------------------------------------------------------
+          find \
+            "${BUILD_DIR}/DerivedData/Build/Products" \
+            -type d \
+            -name "HakoClient.app" \
+            -print
+      # ==========================================================
       # Validate application
-      # --------------------------------------------------------
+      # ==========================================================
       - name: Validate HakoClient.app
         shell: bash
         run: |
           set -euo pipefail
-
-          APP=$(find "${BUILD_DIR}/DerivedData/Build/Products" -type d -name "HakoClient.app" | head -n 1)
+          APP="$(
+            find \
+              "${BUILD_DIR}/DerivedData/Build/Products" \
+              -type d \
+              -name "HakoClient.app" \
+              | head -n 1
+          )"
           if [ -z "${APP}" ]; then
             echo "ERROR: HakoClient.app not found"
             find "${BUILD_DIR}" -name "*.app" -print || true
             exit 1
           fi
-
-          echo "App: ${APP}"
+          echo "========================================"
+          echo "HakoClient.app"
+          echo "========================================"
+          echo "${APP}"
           echo
-          echo "========================================"
-          echo "Application"
-          echo "========================================"
           ls -lah "${APP}"
-          echo
-          echo "========================================"
-          echo "Executable"
-          echo "========================================"
-          file "${APP}/Contents/MacOS/HakoClient"
-          echo
-          echo "========================================"
-          echo "Mihomo"
-          echo "========================================"
-          MIHOMO="${APP}/Contents/Resources/Core/mihomo/arm64/mihomo"
-          if [ ! -f "${MIHOMO}" ]; then
-            echo "ERROR: Mihomo was not bundled into the application"
-            echo
-            echo "Searching application bundle:"
-            find "${APP}/Contents" -type f -name "mihomo" -print || true
+          # ------------------------------------------------------
+          # Main executable
+          # ------------------------------------------------------
+          EXECUTABLE="${APP}/Contents/MacOS/HakoClient"
+          if [ ! -f "${EXECUTABLE}" ]; then
+            echo "ERROR: HakoClient executable not found"
             exit 1
           fi
+          echo
+          echo "========================================"
+          echo "Application Architecture"
+          echo "========================================"
+          file "${EXECUTABLE}"
+          lipo -info "${EXECUTABLE}"
+          file "${EXECUTABLE}" \
+            | grep -E "arm64|ARM64"
+          # Explicitly reject x86_64
+          if file "${EXECUTABLE}" | grep -q "x86_64"; then
+            echo "ERROR: x86_64 architecture detected"
+            exit 1
+          fi
+          echo
+          echo "HakoClient is ARM64 only."
+      # ==========================================================
+      # Validate Mihomo inside bundle
+      # ==========================================================
+      - name: Validate bundled Mihomo
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP="$(
+            find \
+              "${BUILD_DIR}/DerivedData/Build/Products" \
+              -type d \
+              -name "HakoClient.app" \
+              | head -n 1
+          )"
+          MIHOMO="${APP}/Contents/Resources/Core/mihomo/arm64/mihomo"
+          echo "Expected Mihomo:"
+          echo "${MIHOMO}"
+          if [ ! -f "${MIHOMO}" ]; then
+            echo
+            echo "ERROR: Mihomo was NOT bundled."
+            echo
+            echo "Searching bundle:"
+            find \
+              "${APP}/Contents" \
+              -type f \
+              -name "mihomo" \
+              -print || true
+            exit 1
+          fi
+          echo
+          echo "Mihomo found."
           file "${MIHOMO}"
-          file "${MIHOMO}" | grep -E "arm64|ARM64"
+          file "${MIHOMO}" \
+            | grep -E "arm64|ARM64"
           test -x "${MIHOMO}"
           echo
-          echo "Mihomo successfully bundled."
-
-      # --------------------------------------------------------
+          echo "Mihomo architecture:"
+          lipo -info "${MIHOMO}" 2>/dev/null || true
+          echo
+          echo "Mihomo version:"
+          "${MIHOMO}" -v || true
+      # ==========================================================
       # Inspect bundle
-      # --------------------------------------------------------
+      # ==========================================================
       - name: Inspect application bundle
         shell: bash
         run: |
           set -euo pipefail
-          APP=$(find "${BUILD_DIR}/DerivedData/Build/Products" -type d -name "HakoClient.app" | head -n 1)
+          APP="$(
+            find \
+              "${BUILD_DIR}/DerivedData/Build/Products" \
+              -type d \
+              -name "HakoClient.app" \
+              | head -n 1
+          )"
           echo "Bundle structure:"
-          find "${APP}/Contents" -maxdepth 5 -print
-
-      # --------------------------------------------------------
-      # Code signing inspection (informational)
-      # --------------------------------------------------------
+          find \
+            "${APP}/Contents" \
+            -maxdepth 6 \
+            -print
+      # ==========================================================
+      # Code signing inspection
+      # ==========================================================
       - name: Inspect code signature
         shell: bash
         run: |
           set +e
-          APP=$(find "${BUILD_DIR}/DerivedData/Build/Products" -type d -name "HakoClient.app" | head -n 1)
-          codesign --display --verbose=4 "${APP}" || true
-
-      # --------------------------------------------------------
-      # Package application
-      # --------------------------------------------------------
+          APP="$(
+            find \
+              "${BUILD_DIR}/DerivedData/Build/Products" \
+              -type d \
+              -name "HakoClient.app" \
+              | head -n 1
+          )"
+          codesign \
+            --display \
+            --verbose=4 \
+            "${APP}"
+          exit 0
+      # ==========================================================
+      # Package
+      # ==========================================================
       - name: Package Hako Client
         shell: bash
         run: |
           set -euo pipefail
-
-          APP=$(find "${BUILD_DIR}/DerivedData/Build/Products" -type d -name "HakoClient.app" | head -n 1)
+          APP="$(
+            find \
+              "${BUILD_DIR}/DerivedData/Build/Products" \
+              -type d \
+              -name "HakoClient.app" \
+              | head -n 1
+          )"
           if [ -z "${APP}" ]; then
             echo "ERROR: HakoClient.app not found"
             exit 1
           fi
-
-          VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "${APP}/Contents/Info.plist" 2>/dev/null || echo "0.1")
-          ARCH="arm64"
-          ZIP_NAME="HakoClient-v${VERSION}-macOS-${ARCH}.zip"
-
-          ditto -c -k --sequesterRsrc --keepParent "${APP}" "${DIST_DIR}/${ZIP_NAME}"
+          VERSION="$(
+            /usr/libexec/PlistBuddy \
+              -c "Print :CFBundleShortVersionString" \
+              "${APP}/Contents/Info.plist" \
+              2>/dev/null \
+              || echo "0.1"
+          )"
+          ZIP_NAME="HakoClient-v${VERSION}-macOS-arm64.zip"
+          ditto \
+            -c \
+            -k \
+            --sequesterRsrc \
+            --keepParent \
+            "${APP}" \
+            "${DIST_DIR}/${ZIP_NAME}"
+          echo
           echo "Created:"
           ls -lh "${DIST_DIR}/${ZIP_NAME}"
-
-      # --------------------------------------------------------
+      # ==========================================================
       # SHA256
-      # --------------------------------------------------------
+      # ==========================================================
       - name: Generate SHA256
         shell: bash
         run: |
           set -euo pipefail
           cd "${DIST_DIR}"
-          shasum -a 256 *.zip > SHA256SUMS
+          shasum \
+            -a 256 \
+            *.zip \
+            > SHA256SUMS
           cat SHA256SUMS
-
-      # --------------------------------------------------------
+      # ==========================================================
       # Build metadata
-      # --------------------------------------------------------
+      # ==========================================================
       - name: Generate build metadata
         shell: bash
         run: |
           set -euo pipefail
-
-          APP=$(find "${BUILD_DIR}/DerivedData/Build/Products" -type d -name "HakoClient.app" | head -n 1)
-          APP_VERSION=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "${APP}/Contents/Info.plist" 2>/dev/null || echo "unknown")
-          APP_BUILD=$(/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" "${APP}/Contents/Info.plist" 2>/dev/null || echo "unknown")
-
+          APP="$(
+            find \
+              "${BUILD_DIR}/DerivedData/Build/Products" \
+              -type d \
+              -name "HakoClient.app" \
+              | head -n 1
+          )"
+          APP_VERSION="$(
+            /usr/libexec/PlistBuddy \
+              -c "Print :CFBundleShortVersionString" \
+              "${APP}/Contents/Info.plist" \
+              2>/dev/null \
+              || echo "unknown"
+          )"
+          APP_BUILD="$(
+            /usr/libexec/PlistBuddy \
+              -c "Print :CFBundleVersion" \
+              "${APP}/Contents/Info.plist" \
+              2>/dev/null \
+              || echo "unknown"
+          )"
           cat > "${DIST_DIR}/build-metadata.txt" <<EOF
-          Hako Client Build
-
-          Application: HakoClient
-          Version: ${APP_VERSION}
-          Build: ${APP_BUILD}
-          Configuration: ${CONFIGURATION}
-          Architecture: arm64
-          Platform: macOS
-          Mihomo: official prebuilt darwin-arm64
-          Signing: Unsigned
-          Apple Developer Program: Not required for v0.1 build
-          Build Time: $(date -u '+%Y-%m-%dT%H:%M:%SZ')
-          EOF
-
+Hako Client Build
+Application: HakoClient
+Version: ${APP_VERSION}
+Build: ${APP_BUILD}
+Configuration: ${CONFIGURATION}
+Platform: macOS
+Architecture: arm64
+Excluded Architecture: x86_64
+Mihomo:
+  Source: MetaCubeX/mihomo
+  Platform: darwin
+  Architecture: arm64
+Signing:
+  Status: Unsigned
+  Apple Developer Program: Not required
+Build Time:
+  $(date -u '+%Y-%m-%dT%H:%M:%SZ')
+EOF
           cat "${DIST_DIR}/build-metadata.txt"
-
-      # --------------------------------------------------------
-      # Upload final artifact
-      # --------------------------------------------------------
+      # ==========================================================
+      # Final artifact
+      # ==========================================================
       - name: Upload Hako Client artifact
         uses: actions/upload-artifact@v4
         with:
@@ -368,10 +514,9 @@ jobs:
             HakoClient/dist/mihomo-metadata.txt
           if-no-files-found: error
           retention-days: 30
-
-      # --------------------------------------------------------
-      # Upload diagnostics if build fails
-      # --------------------------------------------------------
+      # ==========================================================
+      # Diagnostics
+      # ==========================================================
       - name: Upload build diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
