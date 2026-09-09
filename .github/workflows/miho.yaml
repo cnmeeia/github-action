@@ -1,0 +1,269 @@
+name: Build macOS M1 ARM64
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build-macos-arm64:
+    name: Build macOS ARM64
+    runs-on: macos-14
+
+    permissions:
+      contents: write
+
+    env:
+      CNB_USER: ${{ secrets.CNB_USER }}
+      CNB_PASSWORD: ${{ secrets.CNB_PASSWORD }}
+
+    steps:
+      # ========================================
+      # 1. 下载 CNB 源码
+      # ========================================
+      - name: Download source from CNB
+        shell: bash
+        run: |
+          set -e
+
+          echo "Downloading source..."
+
+          wget \
+            --auth-no-challenge \
+            --user="$CNB_USER" \
+            --password="$CNB_PASSWORD" \
+            -O source.zip \
+            "https://api.cnb.cool/cnmeeia/new-mihomo/-/git/archive/refs/heads/auto/mihomo-gui-f1b5.zip"
+
+          ls -lh source.zip
+
+          file source.zip
+
+      # ========================================
+      # 2. 解压源码
+      # ========================================
+      - name: Extract source
+        shell: bash
+        run: |
+          set -e
+
+          mkdir source
+
+          unzip -q source.zip -d source
+
+          echo "Extracted:"
+          find source -maxdepth 2 -type f | head -100
+
+      # ========================================
+      # 3. 自动找到项目根目录
+      # ========================================
+      - name: Detect project directory
+        shell: bash
+        run: |
+          set -e
+
+          PROJECT_DIR=$(find "$GITHUB_WORKSPACE/source" \
+            -name package.json \
+            -not -path "*/node_modules/*" \
+            -print -quit \
+            | xargs dirname)
+
+          if [ -z "$PROJECT_DIR" ]; then
+            echo "package.json not found"
+            exit 1
+          fi
+
+          echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
+
+          echo "Project directory:"
+          echo "$PROJECT_DIR"
+
+          echo "Project files:"
+          ls -lah "$PROJECT_DIR"
+
+      # ========================================
+      # 4. Node.js
+      # ========================================
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # ========================================
+      # 5. pnpm
+      # ========================================
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      # ========================================
+      # 6. Rust
+      # ========================================
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      # ========================================
+      # 7. Rust cache
+      # ========================================
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            ${{ env.PROJECT_DIR }}/src-tauri
+
+      # ========================================
+      # 8. 检查环境
+      # ========================================
+      - name: Check environment
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          echo "================================"
+          echo "System"
+          echo "================================"
+
+          uname -a
+          sw_vers
+
+          echo "================================"
+          echo "Node"
+          echo "================================"
+
+          node --version
+          pnpm --version
+
+          echo "================================"
+          echo "Rust"
+          echo "================================"
+
+          rustc --version
+          cargo --version
+
+          echo "================================"
+          echo "Targets"
+          echo "================================"
+
+          rustup target list --installed
+
+      # ========================================
+      # 9. 安装依赖
+      # ========================================
+      - name: Install dependencies
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set -e
+
+          if [ -f pnpm-lock.yaml ]; then
+            pnpm install --frozen-lockfile
+          else
+            pnpm install
+          fi
+
+      # ========================================
+      # 10. 构建前端
+      # ========================================
+      - name: Build frontend
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set -e
+
+          pnpm build
+
+      # ========================================
+      # 11. 检查 Tauri
+      # ========================================
+      - name: Check Tauri
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set -e
+
+          if [ -f src-tauri/Cargo.toml ]; then
+            echo "Tauri project detected"
+
+            cat src-tauri/Cargo.toml | head -80
+          else
+            echo "ERROR: src-tauri/Cargo.toml not found"
+            exit 1
+          fi
+
+      # ========================================
+      # 12. 编译 Tauri ARM64
+      # ========================================
+      - name: Build Tauri ARM64
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          set -e
+
+          pnpm tauri build \
+            --target aarch64-apple-darwin
+
+      # ========================================
+      # 13. 查看编译结果
+      # ========================================
+      - name: List build artifacts
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          echo "================================"
+          echo "Build artifacts"
+          echo "================================"
+
+          find src-tauri/target/aarch64-apple-darwin/release/bundle \
+            -type f \
+            -maxdepth 4 \
+            -print
+
+      # ========================================
+      # 14. 检查 ARM64
+      # ========================================
+      - name: Verify ARM64 binary
+        working-directory: ${{ env.PROJECT_DIR }}
+        shell: bash
+        run: |
+          set -e
+
+          echo "Checking binaries..."
+
+          find src-tauri/target/aarch64-apple-darwin/release \
+            -type f \
+            -perm -111 \
+            -maxdepth 2 \
+            -exec file {} \; \
+            || true
+
+      # ========================================
+      # 15. 上传 GitHub Artifact
+      # ========================================
+      - name: Upload macOS ARM64
+        uses: actions/upload-artifact@v4
+        with:
+          name: mihomo-gui-macos-arm64
+          path: |
+            ${{ env.PROJECT_DIR }}/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+            ${{ env.PROJECT_DIR }}/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app
+            ${{ env.PROJECT_DIR }}/src-tauri/target/aarch64-apple-darwin/release/*.app
+          if-no-files-found: warn
+          retention-days: 30
+
+      # ========================================
+      # 16. 单独上传 DMG
+      # ========================================
+      - name: Upload DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: mihomo-gui-macos-arm64-dmg
+          path: |
+            ${{ env.PROJECT_DIR }}/src-tauri/target/aarch64-apple-darwin/release/bundle/dmg/*.dmg
+          if-no-files-found: warn
+          retention-days: 30
+
+      # ========================================
+      # 17. 单独上传 APP
+      # ========================================
+      - name: Upload APP
+        uses: actions/upload-artifact@v4
+        with:
+          name: mihomo-gui-macos-arm64-app
+          path: |
+            ${{ env.PROJECT_DIR }}/src-tauri/target/aarch64-apple-darwin/release/bundle/macos/*.app
+          if-no-files-found: warn
+          retention-days: 30
