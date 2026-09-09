@@ -12,7 +12,7 @@ jobs:
     runs-on: macos-14
 
     env:
-      CNB_USER: cnb
+      CNB_USER: $CNB_USER"
       CNB_PASSWORD: ${{ secrets.CNB_PASSWORD }}
       CNB_URL: https://api.cnb.cool/cnmeeia/new-mihomo/-/git/archive/refs/heads/auto/mihomo-gui-f1b5.zip
 
