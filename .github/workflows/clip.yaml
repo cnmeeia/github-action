@@ -37,10 +37,45 @@ jobs:
       - name: Build
         working-directory: ClipBoard
         run: pnpm run build
-
       - name: Deploy
         working-directory: ClipBoard
-        run: pnpm run deploy
+        run: |
+          set -o pipefail
+      
+          pnpm run deploy 2>&1 | tee deploy.log
+      
+          # 提取 Cloudflare Worker Version ID
+          VERSION_ID=$(grep -oE 'Current Version ID: [a-f0-9-]+' deploy.log | head -1 | sed 's/Current Version ID: //')
+      
+          if [ -z "$VERSION_ID" ]; then
+            echo "❌ 无法获取 Cloudflare Worker Version ID"
+            exit 1
+          fi
+      
+          echo "Cloudflare Worker Version ID: $VERSION_ID"
+          echo "VERSION_ID=$VERSION_ID" >> "$GITHUB_ENV"
+      
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      
+      
+      - name: Bark Notification
+        if: success()
+        run: |
+          echo "📱 Sending Bark notification..."
+      
+          curl -G --fail-with-body \
+            --data-urlencode "title=☁️ CloudClipboard 部署成功" \
+            --data-urlencode "body=Worker: cloudclipboard
+          Version ID: ${VERSION_ID}
+          Domain: clip.0272.de5.net" \
+                --data-urlencode "group=CloudClipboard" \
+                --data-urlencode "url=https://clip.0272.de5.net" \
+                "${BARK_URL}/${BARK_TOKEN}"
+          
+              echo "✅ Bark notification sent"
+          
+            env:
+              BARK_URL: ${{ secrets.BARK_URL }}
+              BARK_TOKEN: ${{ secrets.BARK_TOKEN }}
