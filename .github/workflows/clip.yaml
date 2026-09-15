@@ -83,7 +83,7 @@ jobs:
               --arg body "$BODY" \
               --arg group "CloudClipboard" \
               --arg url "https://clip.0272.de5.net" \
-              '{title: $title, body: $body, group: $group, url: $url}')" \
+              '{title: $title, body: $body}')" \
             "${BARK_URL}"
 
           echo "✅ Bark notification sent"
