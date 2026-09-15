@@ -61,18 +61,29 @@ jobs:
       
       - name: Bark Notification
         if: success()
+        env:
+          BARK_URL: ${{ secrets.BARK_URL }}
         run: |
+          if [ -z "${BARK_URL}" ]; then
+            echo "::warning::BARK_URL secret is not set. Skipping notification."
+            exit 0
+          fi
+
           echo "📱 Sending Bark notification..."
+          
           BODY="Worker: cloudclipboard
           Version ID: ${VERSION_ID}
           Domain: clip.0272.de5.net"
-              curl --fail-with-body \
-                --get \
-                --data-urlencode "title=☁️ CloudClipboard 部署成功" \
-                --data-urlencode "body=${BODY}" \
-                --data-urlencode "group=CloudClipboard" \
-                --data-urlencode "url=https://clip.0272.de5.net" \
-                "${BARK_URL}"
-              echo "✅ Bark notification sent"
-            env:
-              BARK_URL: ${{ secrets.BARK_URL }}
+
+          curl --fail-with-body \
+            --request POST \
+            --header "Content-Type: application/json; charset=utf-8" \
+            --data "$(jq -n \
+              --arg title "☁️ CloudClipboard 部署成功" \
+              --arg body "$BODY" \
+              --arg group "CloudClipboard" \
+              --arg url "https://clip.0272.de5.net" \
+              '{title: $title, body: $body, group: $group, url: $url}')" \
+            "${BARK_URL}"
+
+          echo "✅ Bark notification sent"
