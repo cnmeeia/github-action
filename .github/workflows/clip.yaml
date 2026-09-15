@@ -59,23 +59,20 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
       
-      
       - name: Bark Notification
         if: success()
         run: |
           echo "📱 Sending Bark notification..."
-      
-          curl -G --fail-with-body \
-            --data-urlencode "title=☁️ CloudClipboard 部署成功" \
-            --data-urlencode "body=Worker: cloudclipboard
+          BODY="Worker: cloudclipboard
           Version ID: ${VERSION_ID}
-          Domain: clip.0272.de5.net" \
+          Domain: clip.0272.de5.net"
+              curl --fail-with-body \
+                --get \
+                --data-urlencode "title=☁️ CloudClipboard 部署成功" \
+                --data-urlencode "body=${BODY}" \
                 --data-urlencode "group=CloudClipboard" \
                 --data-urlencode "url=https://clip.0272.de5.net" \
-                "${BARK_URL}/${BARK_TOKEN}"
-          
+                "${BARK_URL}"
               echo "✅ Bark notification sent"
-          
             env:
               BARK_URL: ${{ secrets.BARK_URL }}
-              BARK_TOKEN: ${{ secrets.BARK_TOKEN }}
