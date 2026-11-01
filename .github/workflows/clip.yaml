@@ -16,7 +16,15 @@ jobs:
     steps:
       - name: Clone CNB repository
         run: |
-          git clone --depth 1 https://cnb.cool/cnmeeia/ClipBoard.git ClipBoard
+          # 明确指定拉取 main 分支
+          git clone --depth 1 -b main https://cnb.cool/cnmeeia/ClipBoard.git ClipBoard
+
+      - name: Inspect wrangler.jsonc source
+        working-directory: ClipBoard/apps/worker
+        run: |
+          echo "=== 检查拉取到的原始 wrangler.jsonc ==="
+          grep -C 3 "bucket_name" wrangler.jsonc || true
+
 
       - name: Setup pnpm
         uses: pnpm/action-setup@v4
