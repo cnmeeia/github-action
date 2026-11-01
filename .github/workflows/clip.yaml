@@ -37,6 +37,20 @@ jobs:
       - name: Build
         working-directory: ClipBoard
         run: pnpm run build
+
+      - name: Configure Wrangler Environment Variables
+        working-directory: ClipBoard/apps/worker
+        env:
+          CLOUDFLARE_R2_BUCKET_NAME: ${{ secrets.CLOUDFLARE_R2_BUCKET_NAME }}
+        run: |
+          if [ -z "${CLOUDFLARE_R2_BUCKET_NAME}" ]; then
+            echo "❌ 缺少 Secret: CLOUDFLARE_R2_BUCKET_NAME"
+            exit 1
+          fi
+
+          echo "🔧 替换 wrangler.jsonc 中的 R2 Bucket 变量..."
+          sed -i "s|\${CLOUDFLARE_R2_BUCKET_NAME}|${CLOUDFLARE_R2_BUCKET_NAME}|g" wrangler.jsonc
+
       - name: Deploy
         working-directory: ClipBoard
         run: |
